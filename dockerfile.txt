@@ -58,5 +58,8 @@ RUN npm run build
 # Expose the port
 EXPOSE 3000
 
+# Define volume for backups/data
+VOLUME ["/backup"]
+
 # Start the application
 CMD ["npm", "start"]
