@@ -3,3 +3,4 @@ dist
 .env
 data
 wa_auth
+package-lock.json

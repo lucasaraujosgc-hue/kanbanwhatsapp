@@ -45,9 +45,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy package files and install dependencies
-COPY package*.json ./
-RUN npm install --include=optional
+# Copy ONLY package.json to avoid cross-platform lockfile issues with native bindings (Tailwind Oxide)
+COPY package.json ./
+RUN npm install
 
 # Copy source code
 COPY . .
