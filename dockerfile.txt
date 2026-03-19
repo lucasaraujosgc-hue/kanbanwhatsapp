@@ -42,6 +42,8 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
     wget \
     chromium \
+    python3 \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -51,7 +53,7 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true
 
 # Copy ONLY package.json to avoid cross-platform lockfile issues with native bindings (Tailwind Oxide)
 COPY package.json ./
-RUN npm install
+RUN npm install --build-from-source=sqlite3
 
 # Copy source code
 COPY . .
