@@ -41,9 +41,13 @@ RUN apt-get update && apt-get install -y \
     lsb-release \
     xdg-utils \
     wget \
+    chromium \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Skip downloading Chromium through Puppeteer to save space and use the system one
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 
 # Copy ONLY package.json to avoid cross-platform lockfile issues with native bindings (Tailwind Oxide)
 COPY package.json ./

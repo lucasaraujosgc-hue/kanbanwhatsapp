@@ -238,6 +238,7 @@ async function startServer() {
       authStrategy: new LocalAuth({ dataPath: path.join(DATA_DIR, 'wa_auth') }),
       puppeteer: {
         headless: true,
+        executablePath: '/usr/bin/chromium',
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
