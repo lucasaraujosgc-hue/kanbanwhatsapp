@@ -67,5 +67,8 @@ EXPOSE 3000
 # Define volume for backups/data
 VOLUME ["/backup"]
 
+# Set production environment
+ENV NODE_ENV=production
+
 # Start the application
 CMD ["npm", "start"]
