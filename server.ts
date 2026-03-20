@@ -5,11 +5,13 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import sqlite3 from 'sqlite3';
 import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth } = pkg;
+const { Client, LocalAuth, MessageMedia } = pkg;
 import qrcode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import multer from 'multer';
+import { GoogleGenAI } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +25,11 @@ try {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
+const MEDIA_DIR = path.join(DATA_DIR, 'media');
+if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
+
+const upload = multer({ dest: MEDIA_DIR });
+
 const db = new sqlite3.Database(path.join(DATA_DIR, 'kanban.db'));
 
 // Initialize Database
@@ -30,8 +37,12 @@ db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS columns (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    position INTEGER NOT NULL
+    position INTEGER NOT NULL,
+    color TEXT DEFAULT '#e2e8f0'
   )`);
+
+  // Try to add color column if it doesn't exist (for existing databases)
+  db.run(`ALTER TABLE columns ADD COLUMN color TEXT DEFAULT '#e2e8f0'`, (err) => { /* ignore if exists */ });
 
   db.run(`CREATE TABLE IF NOT EXISTS chats (
     id TEXT PRIMARY KEY,
@@ -60,8 +71,18 @@ db.serialize(() => {
     chat_id TEXT NOT NULL,
     body TEXT,
     from_me INTEGER,
-    timestamp INTEGER
+    timestamp INTEGER,
+    media_url TEXT,
+    media_type TEXT,
+    media_name TEXT,
+    transcription TEXT
   )`);
+
+  // Try to add media columns if they don't exist
+  db.run(`ALTER TABLE messages ADD COLUMN media_url TEXT`, (err) => { /* ignore */ });
+  db.run(`ALTER TABLE messages ADD COLUMN media_type TEXT`, (err) => { /* ignore */ });
+  db.run(`ALTER TABLE messages ADD COLUMN media_name TEXT`, (err) => { /* ignore */ });
+  db.run(`ALTER TABLE messages ADD COLUMN transcription TEXT`, (err) => { /* ignore */ });
 
   // Insert default columns if empty
   db.get("SELECT COUNT(*) as count FROM columns", (err, row: any) => {
@@ -90,6 +111,36 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
+  // Serve media files
+  app.use('/media', express.static(MEDIA_DIR));
+
+  // Password protection middleware
+  const checkPassword = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const appPassword = process.env.PASSWORD;
+    if (!appPassword) return next(); // No password set
+    
+    // Allow public access to media if needed, or protect it? Let's protect API only for now, media can be protected too.
+    if (req.path.startsWith('/api/login')) return next();
+
+    const clientPassword = req.headers['x-app-password'];
+    if (clientPassword === appPassword) {
+      next();
+    } else {
+      res.status(401).json({ error: 'Unauthorized' });
+    }
+  };
+
+  app.post('/api/login', (req, res) => {
+    const { password } = req.body;
+    if (!process.env.PASSWORD || password === process.env.PASSWORD) {
+      res.json({ success: true });
+    } else {
+      res.status(401).json({ error: 'Invalid password' });
+    }
+  });
+
+  app.use('/api', checkPassword);
+
   // --- API Routes ---
   app.get('/api/columns', (req, res) => {
     db.all("SELECT * FROM columns ORDER BY position ASC", (err, rows) => {
@@ -99,8 +150,8 @@ async function startServer() {
   });
 
   app.post('/api/columns', (req, res) => {
-    const { id, name, position } = req.body;
-    db.run("INSERT INTO columns (id, name, position) VALUES (?, ?, ?)", [id, name, position], (err) => {
+    const { id, name, position, color } = req.body;
+    db.run("INSERT INTO columns (id, name, position, color) VALUES (?, ?, ?, ?)", [id, name, position, color || '#e2e8f0'], (err) => {
       if (err) return res.status(500).json({ error: err.message });
       io.emit('columns_updated');
       res.json({ success: true });
@@ -108,8 +159,8 @@ async function startServer() {
   });
 
   app.put('/api/columns/:id', (req, res) => {
-    const { name, position } = req.body;
-    db.run("UPDATE columns SET name = ?, position = ? WHERE id = ?", [name, position, req.params.id], (err) => {
+    const { name, position, color } = req.body;
+    db.run("UPDATE columns SET name = ?, position = ?, color = ? WHERE id = ?", [name, position, color || '#e2e8f0', req.params.id], (err) => {
       if (err) return res.status(500).json({ error: err.message });
       io.emit('columns_updated');
       res.json({ success: true });
@@ -191,29 +242,53 @@ async function startServer() {
     });
   });
 
-  app.post('/api/chats/:id/messages', async (req, res) => {
+  app.post('/api/chats/:id/messages', upload.single('media'), async (req, res) => {
     const { body } = req.body;
     const chatId = req.params.id;
+    const file = req.file;
     
     try {
       if (waClient && waStatus === 'connected') {
-        await waClient.sendMessage(chatId, body);
+        let sentMsg;
+        let mediaUrl = null;
+        let mediaType = null;
+        let mediaName = null;
+
+        if (file) {
+          const media = MessageMedia.fromFilePath(file.path);
+          media.filename = file.originalname;
+          sentMsg = await waClient.sendMessage(chatId, media, { caption: body });
+          
+          // Move file to have original extension
+          const ext = path.extname(file.originalname);
+          const newPath = file.path + ext;
+          fs.renameSync(file.path, newPath);
+          
+          mediaUrl = `/media/${file.filename}${ext}`;
+          mediaType = file.mimetype;
+          mediaName = file.originalname;
+        } else {
+          sentMsg = await waClient.sendMessage(chatId, body);
+        }
         
-        const msgId = 'msg-' + Date.now();
+        const msgId = sentMsg.id.id;
         const timestamp = Date.now();
         
-        db.run("INSERT INTO messages (id, chat_id, body, from_me, timestamp) VALUES (?, ?, ?, ?, ?)",
-          [msgId, chatId, body, 1, timestamp]);
+        db.run("INSERT INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [msgId, chatId, body || '', 1, timestamp, mediaUrl, mediaType, mediaName]);
           
         db.run("UPDATE chats SET last_message = ?, last_message_time = ? WHERE id = ?",
-          [body, timestamp, chatId]);
+          [body || 'Media', timestamp, chatId]);
           
         io.emit('new_message', {
           id: msgId,
           chat_id: chatId,
-          body,
+          body: body || '',
           from_me: 1,
-          timestamp
+          timestamp,
+          media_url: mediaUrl,
+          media_type: mediaType,
+          media_name: mediaName
         });
         
         res.json({ success: true });
@@ -295,8 +370,55 @@ async function startServer() {
       const contact = await msg.getContact();
       const name = contact.name || contact.pushname || contact.number;
       const phone = contact.number;
-      const body = msg.body;
+      let body = msg.body;
       const timestamp = msg.timestamp * 1000;
+
+      let mediaUrl = null;
+      let mediaType = null;
+      let mediaName = null;
+      let transcription = null;
+
+      if (msg.hasMedia) {
+        try {
+          const media = await msg.downloadMedia();
+          if (media) {
+            const ext = media.mimetype.split('/')[1].split(';')[0];
+            const filename = `${msg.id.id}.${ext}`;
+            const filepath = path.join(MEDIA_DIR, filename);
+            fs.writeFileSync(filepath, Buffer.from(media.data, 'base64'));
+            
+            mediaUrl = `/media/${filename}`;
+            mediaType = media.mimetype;
+            mediaName = media.filename || filename;
+
+            // Transcribe audio using Gemini
+            if (media.mimetype.startsWith('audio/') && process.env.GEMINI_API_KEY) {
+              try {
+                const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+                const response = await ai.models.generateContent({
+                  model: 'gemini-3-flash-preview',
+                  contents: [
+                    {
+                      inlineData: {
+                        data: media.data,
+                        mimeType: media.mimetype,
+                      },
+                    },
+                    'Transcreva este áudio em português. Retorne apenas a transcrição.',
+                  ],
+                });
+                transcription = response.text;
+              } catch (err) {
+                console.error('Transcription error:', err);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Error downloading media:', err);
+        }
+      }
+
+      const displayBody = body || (mediaType ? `[Media: ${mediaType}]` : '');
 
       // Check if chat exists
       db.get("SELECT id FROM chats WHERE id = ?", [chatId], (err, row) => {
@@ -305,23 +427,23 @@ async function startServer() {
           db.get("SELECT id FROM columns ORDER BY position ASC LIMIT 1", (err, colRow: any) => {
             const colId = colRow ? colRow.id : 'col-1';
             db.run("INSERT INTO chats (id, name, phone, column_id, last_message, last_message_time, unread_count) VALUES (?, ?, ?, ?, ?, ?, 1)",
-              [chatId, name, phone, colId, body, timestamp], () => {
-                io.emit('new_chat', { id: chatId, name, phone, column_id: colId, last_message: body, last_message_time: timestamp, unread_count: 1 });
+              [chatId, name, phone, colId, displayBody, timestamp], () => {
+                io.emit('new_chat', { id: chatId, name, phone, column_id: colId, last_message: displayBody, last_message_time: timestamp, unread_count: 1 });
               });
           });
         } else {
           // Update existing chat
           db.run("UPDATE chats SET last_message = ?, last_message_time = ?, unread_count = unread_count + 1 WHERE id = ?",
-            [body, timestamp, chatId], () => {
-              io.emit('chat_updated', { id: chatId, last_message: body, last_message_time: timestamp });
+            [displayBody, timestamp, chatId], () => {
+              io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp });
             });
         }
       });
 
       // Save message
-      db.run("INSERT INTO messages (id, chat_id, body, from_me, timestamp) VALUES (?, ?, ?, ?, ?)",
-        [msg.id.id, chatId, body, 0, timestamp], () => {
-          io.emit('new_message', { id: msg.id.id, chat_id: chatId, body, from_me: 0, timestamp });
+      db.run("INSERT INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name, transcription) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [msg.id.id, chatId, body, 0, timestamp, mediaUrl, mediaType, mediaName, transcription], () => {
+          io.emit('new_message', { id: msg.id.id, chat_id: chatId, body, from_me: 0, timestamp, media_url: mediaUrl, media_type: mediaType, media_name: mediaName, transcription });
         });
     });
 

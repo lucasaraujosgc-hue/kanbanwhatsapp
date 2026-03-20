@@ -7,6 +7,11 @@ import { format } from 'date-fns';
 const socket = io('/', { transports: ['websocket', 'polling'] });
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
+  const [loginError, setLoginError] = useState('');
+
   const [waStatus, setWaStatus] = useState('disconnected');
   const [qrCode, setQrCode] = useState('');
   const [columns, setColumns] = useState<Column[]>([]);
@@ -16,12 +21,15 @@ export default function App() {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [uploadingMedia, setUploadingMedia] = useState(false);
 
   const [isAddingColumn, setIsAddingColumn] = useState(false);
   const [newColumnName, setNewColumnName] = useState('');
+  const [newColumnColor, setNewColumnColor] = useState('#e2e8f0');
   
   const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
   const [editColumnName, setEditColumnName] = useState('');
+  const [editColumnColor, setEditColumnColor] = useState('#e2e8f0');
 
   const [isAddingTag, setIsAddingTag] = useState(false);
   const [newTagName, setNewTagName] = useState('');
@@ -30,6 +38,74 @@ export default function App() {
   const [chatToTag, setChatToTag] = useState<string | null>(null);
 
   useEffect(() => {
+    const savedPassword = localStorage.getItem('app_password') || sessionStorage.getItem('app_password');
+    if (savedPassword) {
+      setPassword(savedPassword);
+      checkLogin(savedPassword);
+    } else {
+      // Try without password to see if it's required
+      checkLogin('');
+    }
+  }, []);
+
+  const checkLogin = async (pwd: string) => {
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pwd })
+      });
+      if (res.ok) {
+        setIsAuthenticated(true);
+        if (rememberMe && pwd) localStorage.setItem('app_password', pwd);
+        else if (pwd) sessionStorage.setItem('app_password', pwd);
+      } else {
+        setIsAuthenticated(false);
+        localStorage.removeItem('app_password');
+        sessionStorage.removeItem('app_password');
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+      if (res.ok) {
+        setIsAuthenticated(true);
+        setLoginError('');
+        if (rememberMe) localStorage.setItem('app_password', password);
+        else sessionStorage.setItem('app_password', password);
+      } else {
+        setLoginError('Senha incorreta');
+      }
+    } catch (e) {
+      setLoginError('Erro ao conectar');
+    }
+  };
+
+  const apiFetch = async (url: string, options: RequestInit = {}) => {
+    const pwd = localStorage.getItem('app_password') || sessionStorage.getItem('app_password') || password;
+    const headers = new Headers(options.headers || {});
+    if (pwd) headers.set('x-app-password', pwd);
+    
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401) {
+      setIsAuthenticated(false);
+      throw new Error('Unauthorized');
+    }
+    return res;
+  };
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
     fetchData();
 
     socket.on('wa_status', (data) => {
@@ -60,15 +136,15 @@ export default function App() {
       socket.off('chat_tags_updated');
       socket.off('new_message');
     };
-  }, [selectedChat]);
+  }, [selectedChat, isAuthenticated]);
 
   const fetchData = async () => {
     try {
       const [colsRes, chatsRes, tagsRes, waRes] = await Promise.all([
-        fetch('/api/columns'),
-        fetch('/api/chats'),
-        fetch('/api/tags'),
-        fetch('/api/wa/status')
+        apiFetch('/api/columns'),
+        apiFetch('/api/chats'),
+        apiFetch('/api/tags'),
+        apiFetch('/api/wa/status')
       ]);
       
       setColumns(await colsRes.json());
@@ -85,7 +161,7 @@ export default function App() {
 
   const loadMessages = async (chatId: string) => {
     try {
-      const res = await fetch(`/api/chats/${chatId}/messages`);
+      const res = await apiFetch(`/api/chats/${chatId}/messages`);
       setMessages(await res.json());
     } catch (error) {
       console.error('Error loading messages:', error);
@@ -102,7 +178,7 @@ export default function App() {
     if (!newMessage.trim() || !selectedChat) return;
 
     try {
-      await fetch(`/api/chats/${selectedChat.id}/messages`, {
+      await apiFetch(`/api/chats/${selectedChat.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ body: newMessage })
@@ -113,19 +189,55 @@ export default function App() {
     }
   };
 
+  const handleFileUpload = async (file: File) => {
+    if (!selectedChat) return;
+    setUploadingMedia(true);
+    
+    const formData = new FormData();
+    formData.append('media', file);
+    if (newMessage.trim()) {
+      formData.append('body', newMessage);
+    }
+
+    try {
+      await apiFetch(`/api/chats/${selectedChat.id}/messages`, {
+        method: 'POST',
+        body: formData
+      });
+      setNewMessage('');
+    } catch (error) {
+      console.error('Error uploading file:', error);
+    } finally {
+      setUploadingMedia(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFileUpload(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
   const handleAddColumn = async () => {
     if (!newColumnName.trim()) return;
     try {
-      await fetch('/api/columns', {
+      await apiFetch('/api/columns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: 'col-' + Date.now(),
           name: newColumnName,
-          position: columns.length
+          position: columns.length,
+          color: newColumnColor
         })
       });
       setNewColumnName('');
+      setNewColumnColor('#e2e8f0');
       setIsAddingColumn(false);
     } catch (error) {
       console.error('Error adding column:', error);
@@ -134,7 +246,7 @@ export default function App() {
 
   const handleMoveChat = async (chatId: string, columnId: string) => {
     try {
-      await fetch(`/api/chats/${chatId}/column`, {
+      await apiFetch(`/api/chats/${chatId}/column`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ column_id: columnId })
@@ -149,12 +261,13 @@ export default function App() {
     try {
       const column = columns.find(c => c.id === columnId);
       if (!column) return;
-      await fetch(`/api/columns/${columnId}`, {
+      await apiFetch(`/api/columns/${columnId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: editColumnName,
-          position: column.position
+          position: column.position,
+          color: editColumnColor
         })
       });
       setEditingColumnId(null);
@@ -166,7 +279,7 @@ export default function App() {
   const handleAddTag = async () => {
     if (!newTagName.trim()) return;
     try {
-      await fetch('/api/tags', {
+      await apiFetch('/api/tags', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -184,7 +297,7 @@ export default function App() {
 
   const handleAssignTag = async (chatId: string, tagId: string) => {
     try {
-      await fetch(`/api/chats/${chatId}/tags`, {
+      await apiFetch(`/api/chats/${chatId}/tags`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tag_id: tagId })
@@ -197,9 +310,58 @@ export default function App() {
 
   const handleResetWa = async () => {
     if (confirm('Tem certeza que deseja desconectar o WhatsApp?')) {
-      await fetch('/api/wa/reset', { method: 'POST' });
+      await apiFetch('/api/wa/reset', { method: 'POST' });
     }
   };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 font-sans">
+        <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md border border-gray-200">
+          <div className="flex items-center justify-center gap-3 mb-8">
+            <MessageCircle className="text-green-500 w-10 h-10" />
+            <h1 className="text-2xl font-bold text-gray-800">WhatsKanban</h1>
+          </div>
+          
+          <form onSubmit={handleLogin} className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Senha de Acesso</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-colors"
+                placeholder="Insira a senha"
+                required
+              />
+            </div>
+            
+            <div className="flex items-center">
+              <input
+                id="remember"
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+              />
+              <label htmlFor="remember" className="ml-2 block text-sm text-gray-700">
+                Continuar conectado
+              </label>
+            </div>
+
+            {loginError && <p className="text-red-500 text-sm font-medium">{loginError}</p>}
+            
+            <button
+              type="submit"
+              className="w-full bg-green-500 text-white font-semibold py-3 px-4 rounded-lg hover:bg-green-600 transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+            >
+              Entrar
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-gray-100 font-sans">
@@ -284,29 +446,43 @@ export default function App() {
       {/* Kanban Board */}
       <div className="flex-1 overflow-x-auto p-6 flex gap-6">
         {columns.map(column => (
-          <div key={column.id} className="flex-shrink-0 w-80 bg-gray-50 rounded-xl border border-gray-200 flex flex-col max-h-full">
-            <div className="p-3 border-b border-gray-200 flex justify-between items-center bg-gray-100 rounded-t-xl group">
+          <div key={column.id} className="flex-shrink-0 w-80 bg-gray-50 rounded-xl border border-gray-200 flex flex-col max-h-full overflow-hidden shadow-sm">
+            <div 
+              className="p-3 border-b border-gray-200 flex justify-between items-center bg-gray-100 group"
+              style={{ borderTop: `4px solid ${column.color || '#e2e8f0'}` }}
+            >
               {editingColumnId === column.id ? (
-                <div className="flex-1 flex gap-2">
+                <div className="flex-1 flex flex-col gap-2">
                   <input
                     type="text"
                     value={editColumnName}
                     onChange={(e) => setEditColumnName(e.target.value)}
-                    className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-500"
+                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-500"
                     autoFocus
                     onKeyDown={(e) => e.key === 'Enter' && handleEditColumn(column.id)}
                   />
-                  <button onClick={() => handleEditColumn(column.id)} className="text-blue-600 text-xs font-medium">OK</button>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="color" 
+                      value={editColumnColor} 
+                      onChange={(e) => setEditColumnColor(e.target.value)}
+                      className="w-6 h-6 rounded cursor-pointer border-0 p-0"
+                    />
+                    <button onClick={() => handleEditColumn(column.id)} className="text-blue-600 text-xs font-medium bg-blue-50 px-2 py-1 rounded">Salvar</button>
+                    <button onClick={() => setEditingColumnId(null)} className="text-gray-500 text-xs font-medium bg-gray-100 px-2 py-1 rounded">Cancelar</button>
+                  </div>
                 </div>
               ) : (
                 <h3 
-                  className="font-semibold text-gray-700 flex-1 cursor-pointer hover:text-blue-600"
+                  className="font-semibold text-gray-700 flex-1 cursor-pointer hover:text-blue-600 flex items-center gap-2"
                   onClick={() => {
                     setEditingColumnId(column.id);
                     setEditColumnName(column.name);
+                    setEditColumnColor(column.color || '#e2e8f0');
                   }}
                   title="Clique para editar"
                 >
+                  <span className="w-3 h-3 rounded-full" style={{ backgroundColor: column.color || '#e2e8f0' }}></span>
                   {column.name}
                 </h3>
               )}
@@ -376,6 +552,15 @@ export default function App() {
                 autoFocus
                 onKeyDown={(e) => e.key === 'Enter' && handleAddColumn()}
               />
+              <div className="flex items-center gap-2 mb-2">
+                <label className="text-xs text-gray-500">Cor:</label>
+                <input 
+                  type="color" 
+                  value={newColumnColor} 
+                  onChange={(e) => setNewColumnColor(e.target.value)}
+                  className="w-6 h-6 rounded cursor-pointer border-0 p-0"
+                />
+              </div>
               <div className="flex gap-2">
                 <button onClick={handleAddColumn} className="bg-blue-600 text-white text-xs px-3 py-1.5 rounded hover:bg-blue-700">Salvar</button>
                 <button onClick={() => setIsAddingColumn(false)} className="bg-gray-100 text-gray-600 text-xs px-3 py-1.5 rounded hover:bg-gray-200">Cancelar</button>
@@ -449,31 +634,77 @@ export default function App() {
             </div>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#e5ddd5]">
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#e5ddd5]" onDrop={handleDrop} onDragOver={handleDragOver}>
             {messages.map(msg => (
               <div key={msg.id} className={`flex ${msg.from_me ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[80%] rounded-lg p-2 text-sm shadow-sm ${msg.from_me ? 'bg-[#dcf8c6] text-gray-800' : 'bg-white text-gray-800'}`}>
-                  <p>{msg.body}</p>
+                  {msg.media_url && (
+                    <div className="mb-2">
+                      {msg.media_type?.startsWith('image/') ? (
+                        <img src={msg.media_url} alt="Media" className="max-w-full rounded-md max-h-64 object-contain" />
+                      ) : msg.media_type?.startsWith('audio/') ? (
+                        <div className="flex flex-col gap-2">
+                          <audio controls src={msg.media_url} className="w-full max-w-[250px]" />
+                          {msg.transcription && (
+                            <div className="bg-white/50 p-2 rounded text-xs italic border border-gray-200">
+                              <span className="font-semibold not-italic text-gray-600 block mb-1">Transcrição:</span>
+                              {msg.transcription}
+                            </div>
+                          )}
+                        </div>
+                      ) : msg.media_type?.startsWith('video/') ? (
+                        <video controls src={msg.media_url} className="max-w-full rounded-md max-h-64" />
+                      ) : (
+                        <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 bg-black/5 p-2 rounded hover:bg-black/10 transition-colors">
+                          <span className="text-2xl">📄</span>
+                          <span className="truncate max-w-[200px]">{msg.media_name || 'Documento'}</span>
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>}
                   <span className="text-[10px] text-gray-500 block text-right mt-1">
                     {format(new Date(msg.timestamp), 'HH:mm')}
                   </span>
                 </div>
               </div>
             ))}
+            {uploadingMedia && (
+              <div className="flex justify-end">
+                <div className="bg-[#dcf8c6] text-gray-800 max-w-[80%] rounded-lg p-2 text-sm shadow-sm italic opacity-70">
+                  Enviando arquivo...
+                </div>
+              </div>
+            )}
           </div>
           
-          <div className="p-3 border-t border-gray-200 bg-gray-50">
-            <form onSubmit={handleSendMessage} className="flex gap-2">
+          <div className="p-3 border-t border-gray-200 bg-gray-50 relative">
+            {uploadingMedia && (
+              <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-green-500"></div>
+              </div>
+            )}
+            <form onSubmit={handleSendMessage} className="flex gap-2 items-center">
+              <label className="cursor-pointer text-gray-500 hover:text-gray-700 p-2 rounded-full hover:bg-gray-200 transition-colors">
+                <Plus size={20} />
+                <input 
+                  type="file" 
+                  className="hidden" 
+                  onChange={(e) => e.target.files && e.target.files.length > 0 && handleFileUpload(e.target.files[0])}
+                  disabled={uploadingMedia || waStatus !== 'connected'}
+                />
+              </label>
               <input
                 type="text"
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
-                placeholder="Digite uma mensagem..."
+                placeholder="Digite uma mensagem ou arraste um arquivo..."
                 className="flex-1 border border-gray-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                disabled={uploadingMedia || waStatus !== 'connected'}
               />
               <button 
                 type="submit"
-                disabled={!newMessage.trim() || waStatus !== 'connected'}
+                disabled={(!newMessage.trim() && !uploadingMedia) || waStatus !== 'connected'}
                 className="bg-green-500 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"></path></svg>

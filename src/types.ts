@@ -2,6 +2,7 @@ export interface Column {
   id: string;
   name: string;
   position: number;
+  color: string;
 }
 
 export interface Tag {
@@ -27,4 +28,8 @@ export interface Message {
   body: string;
   from_me: number;
   timestamp: number;
+  media_url?: string;
+  media_type?: string;
+  media_name?: string;
+  transcription?: string;
 }
