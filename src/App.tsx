@@ -13,6 +13,7 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
 
   const [waStatus, setWaStatus] = useState('disconnected');
+  const [waError, setWaError] = useState('');
   const [qrCode, setQrCode] = useState('');
   const [columns, setColumns] = useState<Column[]>([]);
   const [chats, setChats] = useState<Chat[]>([]);
@@ -118,6 +119,8 @@ export default function App() {
       setWaStatus(data.status);
       if (data.qr) setQrCode(data.qr);
       else setQrCode('');
+      if (data.error) setWaError(data.error);
+      else setWaError('');
     });
 
     socket.on('columns_updated', fetchData);
@@ -160,6 +163,9 @@ export default function App() {
       const waData = await waRes.json();
       setWaStatus(waData.status);
       if (waData.qr) setQrCode(waData.qr);
+      else setQrCode('');
+      if (waData.error) setWaError(waData.error);
+      else setWaError('');
     } catch (error) {
       console.error('Error fetching data:', error);
     }
@@ -369,6 +375,10 @@ export default function App() {
     }
   };
 
+  const handleRestartWa = async () => {
+    await apiFetch('/api/wa/restart', { method: 'POST' });
+  };
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100 font-sans">
@@ -438,9 +448,15 @@ export default function App() {
             
             <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-4">
               <div className="flex items-center gap-2 mb-2">
-                <Smartphone size={16} className={waStatus === 'connected' ? 'text-green-500' : 'text-gray-400'} />
+                <Smartphone size={16} className={waStatus === 'connected' ? 'text-green-500' : waStatus === 'error' ? 'text-red-500' : 'text-gray-400'} />
                 <span className="text-sm font-medium capitalize">{waStatus}</span>
               </div>
+              
+              {waError && (
+                <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-600 break-words">
+                  {waError}
+                </div>
+              )}
               
               {waStatus === 'qr' && qrCode && (
                 <div className="mt-2 flex flex-col items-center">
@@ -455,6 +471,15 @@ export default function App() {
                   className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-red-600 bg-red-50 py-1.5 rounded hover:bg-red-100 transition-colors"
                 >
                   <RefreshCw size={12} /> Desconectar
+                </button>
+              )}
+              
+              {(waStatus === 'error' || waStatus === 'disconnected') && (
+                <button 
+                  onClick={handleRestartWa}
+                  className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-blue-600 bg-blue-50 py-1.5 rounded hover:bg-blue-100 transition-colors"
+                >
+                  <RefreshCw size={12} /> Reiniciar Conexão
                 </button>
               )}
             </div>

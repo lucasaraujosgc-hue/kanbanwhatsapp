@@ -325,14 +325,43 @@ async function startServer() {
   let waClient: WAClient | null = null;
   let waStatus = 'disconnected';
   let waQrCode = '';
+  let waError = '';
 
   const initWhatsApp = () => {
     console.log('Initializing WhatsApp Client...');
     waStatus = 'initializing';
+    waError = '';
     io.emit('wa_status', { status: waStatus });
 
+    // Remove Chromium lock files if they exist to prevent "profile in use" errors
+    const authPath = path.join(DATA_DIR, 'wa_auth');
+    try {
+      const lockFiles = [
+        path.join(authPath, 'session', 'SingletonLock'),
+        path.join(authPath, 'session', 'SingletonCookie'),
+        path.join(authPath, 'session', 'SingletonSocket'),
+        path.join(authPath, 'session', 'Default', 'SingletonLock'),
+        path.join(authPath, 'session', 'Default', 'SingletonCookie'),
+        path.join(authPath, 'session', 'Default', 'SingletonSocket')
+      ];
+      for (const file of lockFiles) {
+        try {
+          if (fs.lstatSync(file)) {
+            fs.unlinkSync(file);
+            console.log(`Removed lock file: ${file}`);
+          }
+        } catch (err: any) {
+          if (err.code !== 'ENOENT') {
+            console.error(`Error checking/removing ${file}:`, err);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error cleaning up lock files:', e);
+    }
+
     waClient = new Client({
-      authStrategy: new LocalAuth({ dataPath: path.join(DATA_DIR, 'wa_auth') }),
+      authStrategy: new LocalAuth({ dataPath: authPath }),
       puppeteer: {
         headless: true,
         executablePath: '/usr/bin/chromium',
@@ -369,7 +398,8 @@ async function startServer() {
     waClient.on('auth_failure', (msg) => {
       console.error('WhatsApp Auth Failure:', msg);
       waStatus = 'error';
-      io.emit('wa_status', { status: waStatus, error: msg });
+      waError = msg;
+      io.emit('wa_status', { status: waStatus, error: waError });
     });
 
     waClient.on('disconnected', (reason) => {
@@ -478,7 +508,8 @@ async function startServer() {
     waClient.initialize().catch(err => {
       console.error('Failed to initialize WhatsApp:', err);
       waStatus = 'error';
-      io.emit('wa_status', { status: waStatus, error: err.message });
+      waError = err.message;
+      io.emit('wa_status', { status: waStatus, error: waError });
     });
   };
 
@@ -486,7 +517,7 @@ async function startServer() {
   initWhatsApp();
 
   app.get('/api/wa/status', (req, res) => {
-    res.json({ status: waStatus, qr: waQrCode });
+    res.json({ status: waStatus, qr: waQrCode, error: waError });
   });
 
   app.post('/api/wa/reset', async (req, res) => {
@@ -498,6 +529,16 @@ async function startServer() {
     const authPath = path.join(DATA_DIR, 'wa_auth');
     if (fs.existsSync(authPath)) {
       fs.rmSync(authPath, { recursive: true, force: true });
+    }
+    initWhatsApp();
+    res.json({ success: true });
+  });
+
+  app.post('/api/wa/restart', async (req, res) => {
+    if (waClient) {
+      try {
+        await waClient.destroy();
+      } catch (e) {}
     }
     initWhatsApp();
     res.json({ success: true });
