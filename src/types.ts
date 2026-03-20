@@ -20,6 +20,7 @@ export interface Chat {
   last_message_time: number;
   unread_count: number;
   tag_ids: string[];
+  profile_pic?: string;
 }
 
 export interface Message {

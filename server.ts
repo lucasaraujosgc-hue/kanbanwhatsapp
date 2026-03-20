@@ -4,7 +4,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import sqlite3 from 'sqlite3';
-import pkg from 'whatsapp-web.js';
+import pkg, { type Client as WAClient } from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 import qrcode from 'qrcode';
 import path from 'path';
@@ -51,8 +51,12 @@ db.serialize(() => {
     column_id TEXT,
     last_message TEXT,
     last_message_time INTEGER,
-    unread_count INTEGER DEFAULT 0
+    unread_count INTEGER DEFAULT 0,
+    profile_pic TEXT
   )`);
+
+  // Try to add profile_pic column if it doesn't exist
+  db.run(`ALTER TABLE chats ADD COLUMN profile_pic TEXT`, (err) => { /* ignore */ });
 
   db.run(`CREATE TABLE IF NOT EXISTS tags (
     id TEXT PRIMARY KEY,
@@ -202,6 +206,23 @@ async function startServer() {
     });
   });
 
+  app.put('/api/chats/:id/name', (req, res) => {
+    const { name } = req.body;
+    db.run("UPDATE chats SET name = ? WHERE id = ?", [name, req.params.id], (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      io.emit('chat_updated', { id: req.params.id, name });
+      res.json({ success: true });
+    });
+  });
+
+  app.put('/api/chats/:id/read', (req, res) => {
+    db.run("UPDATE chats SET unread_count = 0 WHERE id = ?", [req.params.id], (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      io.emit('chat_updated', { id: req.params.id, unread_count: 0 });
+      res.json({ success: true });
+    });
+  });
+
   app.get('/api/tags', (req, res) => {
     db.all("SELECT * FROM tags", (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
@@ -301,7 +322,7 @@ async function startServer() {
   });
 
   // --- WhatsApp Client Setup ---
-  let waClient: Client | null = null;
+  let waClient: WAClient | null = null;
   let waStatus = 'disconnected';
   let waQrCode = '';
 
@@ -420,22 +441,29 @@ async function startServer() {
 
       const displayBody = body || (mediaType ? `[Media: ${mediaType}]` : '');
 
+      let profilePic = null;
+      try {
+        profilePic = await contact.getProfilePicUrl();
+      } catch (e) {
+        // ignore
+      }
+
       // Check if chat exists
       db.get("SELECT id FROM chats WHERE id = ?", [chatId], (err, row) => {
         if (!row) {
           // New chat, put in first column
           db.get("SELECT id FROM columns ORDER BY position ASC LIMIT 1", (err, colRow: any) => {
             const colId = colRow ? colRow.id : 'col-1';
-            db.run("INSERT INTO chats (id, name, phone, column_id, last_message, last_message_time, unread_count) VALUES (?, ?, ?, ?, ?, ?, 1)",
-              [chatId, name, phone, colId, displayBody, timestamp], () => {
-                io.emit('new_chat', { id: chatId, name, phone, column_id: colId, last_message: displayBody, last_message_time: timestamp, unread_count: 1 });
+            db.run("INSERT INTO chats (id, name, phone, column_id, last_message, last_message_time, unread_count, profile_pic) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+              [chatId, name, phone, colId, displayBody, timestamp, profilePic], () => {
+                io.emit('new_chat', { id: chatId, name, phone, column_id: colId, last_message: displayBody, last_message_time: timestamp, unread_count: 1, profile_pic: profilePic });
               });
           });
         } else {
           // Update existing chat
-          db.run("UPDATE chats SET last_message = ?, last_message_time = ?, unread_count = unread_count + 1 WHERE id = ?",
-            [displayBody, timestamp, chatId], () => {
-              io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp });
+          db.run("UPDATE chats SET last_message = ?, last_message_time = ?, unread_count = unread_count + 1, profile_pic = ? WHERE id = ?",
+            [displayBody, timestamp, profilePic, chatId], () => {
+              io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: profilePic });
             });
         }
       });

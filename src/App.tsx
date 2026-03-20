@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
-import { QrCode, Smartphone, RefreshCw, Plus, MessageCircle, Settings, Tag as TagIcon } from 'lucide-react';
+import { QrCode, Smartphone, RefreshCw, Plus, MessageCircle, Settings, Tag as TagIcon, Menu, X, Edit2, XCircle } from 'lucide-react';
 import { Column, Chat, Tag, Message } from './types';
 import { format } from 'date-fns';
 
@@ -36,6 +36,12 @@ export default function App() {
   const [newTagColor, setNewTagColor] = useState('#3b82f6');
 
   const [chatToTag, setChatToTag] = useState<string | null>(null);
+
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
+  const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([]);
+  const [editingChatNameId, setEditingChatNameId] = useState<string | null>(null);
+  const [editChatName, setEditChatName] = useState('');
 
   useEffect(() => {
     const savedPassword = localStorage.getItem('app_password') || sessionStorage.getItem('app_password');
@@ -168,8 +174,17 @@ export default function App() {
     }
   };
 
-  const handleChatSelect = (chat: Chat) => {
+  const handleChatSelect = async (chat: Chat) => {
     setSelectedChat(chat);
+    setIsRightSidebarOpen(true);
+    if (chat.unread_count > 0) {
+      try {
+        await apiFetch(`/api/chats/${chat.id}/read`, { method: 'PUT' });
+        setChats(prev => prev.map(c => c.id === chat.id ? { ...c, unread_count: 0 } : c));
+      } catch (error) {
+        console.error('Error marking chat as read:', error);
+      }
+    }
     loadMessages(chat.id);
   };
 
@@ -308,6 +323,46 @@ export default function App() {
     }
   };
 
+  const handleRemoveTag = async (chatId: string, tagId: string) => {
+    try {
+      await apiFetch(`/api/chats/${chatId}/tags/${tagId}`, {
+        method: 'DELETE'
+      });
+    } catch (error) {
+      console.error('Error removing tag:', error);
+    }
+  };
+
+  const handleEditChatName = async (chatId: string) => {
+    if (!editChatName.trim()) return;
+    try {
+      await apiFetch(`/api/chats/${chatId}/name`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editChatName })
+      });
+      setEditingChatNameId(null);
+    } catch (error) {
+      console.error('Error editing chat name:', error);
+    }
+  };
+
+  const handleDragStart = (e: React.DragEvent, chatId: string) => {
+    e.dataTransfer.setData('chatId', chatId);
+  };
+
+  const handleColumnDrop = (e: React.DragEvent, columnId: string) => {
+    e.preventDefault();
+    const chatId = e.dataTransfer.getData('chatId');
+    if (chatId) {
+      handleMoveChat(chatId, columnId);
+    }
+  };
+
+  const handleColumnDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
   const handleResetWa = async () => {
     if (confirm('Tem certeza que deseja desconectar o WhatsApp?')) {
       await apiFetch('/api/wa/reset', { method: 'POST' });
@@ -364,89 +419,149 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-100 font-sans">
+    <div className="flex h-screen bg-gray-100 font-sans overflow-hidden">
       {/* Sidebar / Settings */}
-      <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
-        <div className="p-4 border-b border-gray-200 flex items-center gap-2">
-          <MessageCircle className="text-green-500" />
-          <h1 className="font-bold text-lg text-gray-800">WhatsKanban</h1>
-        </div>
-        
-        <div className="p-4 flex-1">
-          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Conexão WhatsApp</h2>
-          
-          <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Smartphone size={16} className={waStatus === 'connected' ? 'text-green-500' : 'text-gray-400'} />
-              <span className="text-sm font-medium capitalize">{waStatus}</span>
+      {isSidebarOpen && (
+        <div className="w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
+          <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <MessageCircle className="text-green-500" />
+              <h1 className="font-bold text-lg text-gray-800">WhatsKanban</h1>
             </div>
-            
-            {waStatus === 'qr' && qrCode && (
-              <div className="mt-2 flex flex-col items-center">
-                <img src={qrCode} alt="QR Code" className="w-full h-auto rounded-md border border-gray-200" />
-                <p className="text-xs text-gray-500 mt-2 text-center">Escaneie para conectar</p>
-              </div>
-            )}
-            
-            {waStatus === 'connected' && (
-              <button 
-                onClick={handleResetWa}
-                className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-red-600 bg-red-50 py-1.5 rounded hover:bg-red-100 transition-colors"
-              >
-                <RefreshCw size={12} /> Desconectar
-              </button>
-            )}
+            <button onClick={() => setIsSidebarOpen(false)} className="text-gray-500 hover:text-gray-700">
+              <X size={20} />
+            </button>
           </div>
-
-          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 mt-6">Tags</h2>
-          <div className="space-y-2">
-            {tags.map(tag => (
-              <div key={tag.id} className="flex items-center gap-2 text-sm">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: tag.color }}></div>
-                <span>{tag.name}</span>
-              </div>
-            ))}
+          
+          <div className="p-4 flex-1 overflow-y-auto">
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Conexão WhatsApp</h2>
             
-            {isAddingTag ? (
-              <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded-md">
-                <input
-                  type="text"
-                  value={newTagName}
-                  onChange={(e) => setNewTagName(e.target.value)}
-                  placeholder="Nome da tag"
-                  className="w-full border border-gray-300 rounded px-2 py-1 text-xs mb-2 focus:outline-none focus:border-blue-500"
-                  autoFocus
-                />
-                <div className="flex items-center gap-2 mb-2">
-                  <input 
-                    type="color" 
-                    value={newTagColor} 
-                    onChange={(e) => setNewTagColor(e.target.value)}
-                    className="w-6 h-6 p-0 border-0 rounded cursor-pointer"
-                  />
-                  <span className="text-xs text-gray-500">Cor</span>
-                </div>
-                <div className="flex gap-1">
-                  <button onClick={handleAddTag} className="flex-1 bg-blue-600 text-white text-[10px] px-2 py-1 rounded hover:bg-blue-700">Salvar</button>
-                  <button onClick={() => setIsAddingTag(false)} className="flex-1 bg-gray-200 text-gray-700 text-[10px] px-2 py-1 rounded hover:bg-gray-300">Cancelar</button>
-                </div>
+            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Smartphone size={16} className={waStatus === 'connected' ? 'text-green-500' : 'text-gray-400'} />
+                <span className="text-sm font-medium capitalize">{waStatus}</span>
               </div>
-            ) : (
-              <button 
-                onClick={() => setIsAddingTag(true)}
-                className="text-xs text-blue-600 flex items-center gap-1 hover:underline mt-2"
-              >
-                <Plus size={12} /> Nova Tag
-              </button>
-            )}
+              
+              {waStatus === 'qr' && qrCode && (
+                <div className="mt-2 flex flex-col items-center">
+                  <img src={qrCode} alt="QR Code" className="w-full h-auto rounded-md border border-gray-200" />
+                  <p className="text-xs text-gray-500 mt-2 text-center">Escaneie para conectar</p>
+                </div>
+              )}
+              
+              {waStatus === 'connected' && (
+                <button 
+                  onClick={handleResetWa}
+                  className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-red-600 bg-red-50 py-1.5 rounded hover:bg-red-100 transition-colors"
+                >
+                  <RefreshCw size={12} /> Desconectar
+                </button>
+              )}
+            </div>
+
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 mt-6">Filtro de Tags</h2>
+            <div className="flex flex-wrap gap-1 mb-6">
+              {tags.map(tag => {
+                const isSelected = selectedTagFilters.includes(tag.id);
+                return (
+                  <button
+                    key={tag.id}
+                    onClick={() => {
+                      if (isSelected) {
+                        setSelectedTagFilters(prev => prev.filter(id => id !== tag.id));
+                      } else {
+                        setSelectedTagFilters(prev => [...prev, tag.id]);
+                      }
+                    }}
+                    className={`text-xs px-2 py-1 rounded-full border flex items-center gap-1 transition-colors ${isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}
+                  >
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: tag.color }}></div>
+                    {tag.name}
+                  </button>
+                );
+              })}
+              {tags.length === 0 && <p className="text-xs text-gray-400 italic">Nenhuma tag criada</p>}
+            </div>
+
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Gerenciar Tags</h2>
+            <div className="space-y-2">
+              {tags.map(tag => (
+                <div key={tag.id} className="flex items-center gap-2 text-sm">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: tag.color }}></div>
+                  <span>{tag.name}</span>
+                </div>
+              ))}
+              
+              {isAddingTag ? (
+                <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded-md">
+                  <input
+                    type="text"
+                    value={newTagName}
+                    onChange={(e) => setNewTagName(e.target.value)}
+                    placeholder="Nome da tag"
+                    className="w-full border border-gray-300 rounded px-2 py-1 text-xs mb-2 focus:outline-none focus:border-blue-500"
+                    autoFocus
+                  />
+                  <div className="flex items-center gap-2 mb-2">
+                    <input 
+                      type="color" 
+                      value={newTagColor} 
+                      onChange={(e) => setNewTagColor(e.target.value)}
+                      className="w-6 h-6 p-0 border-0 rounded cursor-pointer"
+                    />
+                    <span className="text-xs text-gray-500">Cor</span>
+                  </div>
+                  <div className="flex gap-1">
+                    <button onClick={handleAddTag} className="flex-1 bg-blue-600 text-white text-[10px] px-2 py-1 rounded hover:bg-blue-700">Salvar</button>
+                    <button onClick={() => setIsAddingTag(false)} className="flex-1 bg-gray-200 text-gray-700 text-[10px] px-2 py-1 rounded hover:bg-gray-300">Cancelar</button>
+                  </div>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => setIsAddingTag(true)}
+                  className="text-xs text-blue-600 flex items-center gap-1 hover:underline mt-2"
+                >
+                  <Plus size={12} /> Nova Tag
+                </button>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Kanban Board */}
-      <div className="flex-1 overflow-x-auto p-6 flex gap-6">
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="p-2 border-b border-gray-200 bg-white flex items-center justify-between">
+          <div className="flex items-center">
+            {!isSidebarOpen && (
+              <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-gray-500 hover:bg-gray-100 rounded-md">
+                <Menu size={20} />
+              </button>
+            )}
+            <div className={`${!isSidebarOpen ? 'ml-4' : 'ml-2'} flex items-center gap-2`}>
+              <MessageCircle className="text-green-500" size={20} />
+              <h1 className="font-bold text-gray-800">WhatsKanban</h1>
+            </div>
+          </div>
+          {selectedChat && !isRightSidebarOpen && (
+            <button 
+              onClick={() => setIsRightSidebarOpen(true)} 
+              className="p-2 text-gray-500 hover:bg-gray-100 rounded-md flex items-center gap-2"
+              title="Mostrar painel do chat"
+            >
+              <span className="text-sm font-medium">{selectedChat.name || selectedChat.phone}</span>
+              <Menu size={20} />
+            </button>
+          )}
+        </div>
+        <div className="flex-1 overflow-x-auto p-6 flex gap-6">
         {columns.map(column => (
-          <div key={column.id} className="flex-shrink-0 w-80 bg-gray-50 rounded-xl border border-gray-200 flex flex-col max-h-full overflow-hidden shadow-sm">
+          <div 
+            key={column.id} 
+            className="flex-shrink-0 w-80 bg-gray-50 rounded-xl border border-gray-200 flex flex-col max-h-full overflow-hidden shadow-sm"
+            onDrop={(e) => handleColumnDrop(e, column.id)}
+            onDragOver={handleColumnDragOver}
+          >
             <div 
               className="p-3 border-b border-gray-200 flex justify-between items-center bg-gray-100 group"
               style={{ borderTop: `4px solid ${column.color || '#e2e8f0'}` }}
@@ -487,21 +602,53 @@ export default function App() {
                 </h3>
               )}
               <span className="bg-gray-200 text-gray-600 text-xs px-2 py-1 rounded-full font-medium ml-2">
-                {chats.filter(c => c.column_id === column.id).length}
+                {chats.filter(c => c.column_id === column.id && (selectedTagFilters.length === 0 || selectedTagFilters.some(t => c.tag_ids.includes(t)))).length}
               </span>
             </div>
             
             <div className="p-3 flex-1 overflow-y-auto space-y-3">
-              {chats.filter(c => c.column_id === column.id).map(chat => (
+              {chats.filter(c => c.column_id === column.id && (selectedTagFilters.length === 0 || selectedTagFilters.some(t => c.tag_ids.includes(t)))).map(chat => (
                 <div 
                   key={chat.id} 
                   onClick={() => handleChatSelect(chat)}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, chat.id)}
                   className={`bg-white p-3 rounded-lg shadow-sm border cursor-pointer hover:shadow-md transition-shadow ${selectedChat?.id === chat.id ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`}
                 >
                   <div className="flex justify-between items-start mb-1">
-                    <h4 className="font-medium text-gray-900 truncate pr-2">{chat.name || chat.phone}</h4>
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      {chat.profile_pic ? (
+                        <img src={chat.profile_pic} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 flex-shrink-0">
+                          {chat.name ? chat.name.charAt(0).toUpperCase() : '?'}
+                        </div>
+                      )}
+                      {editingChatNameId === chat.id ? (
+                        <input
+                          type="text"
+                          value={editChatName}
+                          onChange={(e) => setEditChatName(e.target.value)}
+                          onBlur={() => handleEditChatName(chat.id)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleEditChatName(chat.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="font-medium text-gray-900 border-b border-blue-500 focus:outline-none w-full"
+                          autoFocus
+                        />
+                      ) : (
+                        <h4 className="font-medium text-gray-900 truncate pr-2 flex items-center gap-1 group/name">
+                          {chat.name || chat.phone}
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setEditingChatNameId(chat.id); setEditChatName(chat.name || chat.phone); }}
+                            className="opacity-0 group-hover/name:opacity-100 text-gray-400 hover:text-blue-500 transition-opacity"
+                          >
+                            <Edit2 size={12} />
+                          </button>
+                        </h4>
+                      )}
+                    </div>
                     {chat.unread_count > 0 && (
-                      <span className="bg-green-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                      <span className="bg-green-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0">
                         {chat.unread_count}
                       </span>
                     )}
@@ -509,29 +656,27 @@ export default function App() {
                   <p className="text-xs text-gray-500 truncate mb-2">{chat.last_message}</p>
                   
                   <div className="flex justify-between items-center mt-2">
-                    <div className="flex gap-1">
+                    <div className="flex flex-wrap gap-1">
                       {chat.tag_ids.map(tagId => {
                         const tag = tags.find(t => t.id === tagId);
                         if (!tag) return null;
-                        return <div key={tagId} className="w-2 h-2 rounded-full" style={{ backgroundColor: tag.color }} title={tag.name} />
+                        return (
+                          <div key={tagId} className="flex items-center gap-1 bg-gray-100 px-1.5 py-0.5 rounded text-[10px] text-gray-600 group/tag">
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: tag.color }} />
+                            <span>{tag.name}</span>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); handleRemoveTag(chat.id, tagId); }}
+                              className="opacity-0 group-hover/tag:opacity-100 text-gray-400 hover:text-red-500 ml-0.5"
+                            >
+                              <X size={10} />
+                            </button>
+                          </div>
+                        );
                       })}
                     </div>
-                    <span className="text-[10px] text-gray-400">
+                    <span className="text-[10px] text-gray-400 flex-shrink-0 ml-2">
                       {chat.last_message_time ? format(new Date(chat.last_message_time), 'HH:mm') : ''}
                     </span>
-                  </div>
-
-                  {/* Quick move buttons */}
-                  <div className="mt-3 pt-2 border-t border-gray-100 flex gap-1 overflow-x-auto pb-1 no-scrollbar">
-                    {columns.filter(c => c.id !== column.id).map(c => (
-                      <button
-                        key={c.id}
-                        onClick={(e) => { e.stopPropagation(); handleMoveChat(chat.id, c.id); }}
-                        className="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded whitespace-nowrap"
-                      >
-                        {c.name}
-                      </button>
-                    ))}
                   </div>
                 </div>
               ))}
@@ -576,9 +721,10 @@ export default function App() {
           )}
         </div>
       </div>
+    </div>
 
-      {/* Chat Panel */}
-      {selectedChat && (
+    {/* Chat Panel */}
+      {selectedChat && isRightSidebarOpen && (
         <div className="w-96 bg-white border-l border-gray-200 flex flex-col shadow-xl z-10">
           <div className="p-4 border-b border-gray-200 flex flex-col bg-gray-50">
             <div className="flex justify-between items-start mb-2">
@@ -586,9 +732,14 @@ export default function App() {
                 <h3 className="font-bold text-gray-800">{selectedChat.name || selectedChat.phone}</h3>
                 <p className="text-xs text-gray-500">{selectedChat.phone}</p>
               </div>
-              <button onClick={() => setSelectedChat(null)} className="text-gray-400 hover:text-gray-600">
-                &times;
-              </button>
+              <div className="flex gap-2">
+                <button onClick={() => setIsRightSidebarOpen(false)} className="text-gray-400 hover:text-gray-600" title="Ocultar painel">
+                  <Menu size={20} />
+                </button>
+                <button onClick={() => setSelectedChat(null)} className="text-gray-400 hover:text-gray-600" title="Fechar chat">
+                  <X size={20} />
+                </button>
+              </div>
             </div>
             
             <div className="flex flex-wrap gap-1 items-center">
