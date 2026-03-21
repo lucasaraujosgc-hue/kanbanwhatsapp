@@ -28,6 +28,8 @@ export default function App() {
   const [newColumnName, setNewColumnName] = useState('');
   const [newColumnColor, setNewColumnColor] = useState('#e2e8f0');
   
+  const [searchQuery, setSearchQuery] = useState('');
+  
   const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
   const [editColumnName, setEditColumnName] = useState('');
   const [editColumnColor, setEditColumnColor] = useState('#e2e8f0');
@@ -192,6 +194,10 @@ export default function App() {
       }
     }
     loadMessages(chat.id);
+
+    if (!chat.profile_pic && waStatus === 'connected') {
+      apiFetch(`/api/chats/${chat.id}/sync-profile-pic`, { method: 'POST' }).catch(console.error);
+    }
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -294,6 +300,21 @@ export default function App() {
       setEditingColumnId(null);
     } catch (error) {
       console.error('Error editing column:', error);
+    }
+  };
+
+  const handleDeleteColumn = async (columnId: string) => {
+    if (columns.length <= 1) {
+      alert('Não é possível excluir a última coluna.');
+      return;
+    }
+    if (confirm('Tem certeza que deseja excluir esta coluna? Os chats serão movidos para outra coluna.')) {
+      try {
+        await apiFetch(`/api/columns/${columnId}`, { method: 'DELETE' });
+        setEditingColumnId(null);
+      } catch (error) {
+        console.error('Error deleting column:', error);
+      }
     }
   };
 
@@ -428,6 +449,15 @@ export default function App() {
     );
   }
 
+  const filteredChats = chats.filter(c => {
+    const matchesTags = selectedTagFilters.length === 0 || selectedTagFilters.some(t => c.tag_ids.includes(t));
+    const matchesSearch = searchQuery === '' || 
+      (c.name && c.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (c.phone && c.phone.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (c.last_message && c.last_message.toLowerCase().includes(searchQuery.toLowerCase()));
+    return matchesTags && matchesSearch;
+  });
+
   return (
     <div className="flex h-screen bg-gray-100 font-sans overflow-hidden">
       {/* Sidebar / Settings */}
@@ -441,6 +471,16 @@ export default function App() {
             <button onClick={() => setIsSidebarOpen(false)} className="text-gray-500 hover:text-gray-700">
               <X size={20} />
             </button>
+          </div>
+          
+          <div className="p-4 border-b border-gray-200">
+            <input
+              type="text"
+              placeholder="Buscar chats..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            />
           </div>
           
           <div className="p-4 flex-1 overflow-y-auto">
@@ -610,6 +650,9 @@ export default function App() {
                     />
                     <button onClick={() => handleEditColumn(column.id)} className="text-blue-600 text-xs font-medium bg-blue-50 px-2 py-1 rounded">Salvar</button>
                     <button onClick={() => setEditingColumnId(null)} className="text-gray-500 text-xs font-medium bg-gray-100 px-2 py-1 rounded">Cancelar</button>
+                    <button onClick={() => handleDeleteColumn(column.id)} className="text-red-600 text-xs font-medium bg-red-50 px-2 py-1 rounded ml-auto" title="Excluir Coluna">
+                      <X size={14} />
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -627,12 +670,12 @@ export default function App() {
                 </h3>
               )}
               <span className="bg-gray-200 text-gray-600 text-xs px-2 py-1 rounded-full font-medium ml-2">
-                {chats.filter(c => c.column_id === column.id && (selectedTagFilters.length === 0 || selectedTagFilters.some(t => c.tag_ids.includes(t)))).length}
+                {filteredChats.filter(c => c.column_id === column.id).length}
               </span>
             </div>
             
             <div className="p-3 flex-1 overflow-y-auto space-y-3">
-              {chats.filter(c => c.column_id === column.id && (selectedTagFilters.length === 0 || selectedTagFilters.some(t => c.tag_ids.includes(t)))).map(chat => (
+              {filteredChats.filter(c => c.column_id === column.id).map(chat => (
                 <div 
                   key={chat.id} 
                   onClick={() => handleChatSelect(chat)}
@@ -753,9 +796,18 @@ export default function App() {
         <div className="w-96 bg-white border-l border-gray-200 flex flex-col shadow-xl z-10">
           <div className="p-4 border-b border-gray-200 flex flex-col bg-gray-50">
             <div className="flex justify-between items-start mb-2">
-              <div>
-                <h3 className="font-bold text-gray-800">{selectedChat.name || selectedChat.phone}</h3>
-                <p className="text-xs text-gray-500">{selectedChat.phone}</p>
+              <div className="flex items-center gap-3">
+                {selectedChat.profile_pic ? (
+                  <img src={selectedChat.profile_pic} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 flex-shrink-0">
+                    {selectedChat.name ? selectedChat.name.charAt(0).toUpperCase() : '?'}
+                  </div>
+                )}
+                <div>
+                  <h3 className="font-bold text-gray-800">{selectedChat.name || selectedChat.phone}</h3>
+                  <p className="text-xs text-gray-500">{selectedChat.phone}</p>
+                </div>
               </div>
               <div className="flex gap-2">
                 <button onClick={() => setIsRightSidebarOpen(false)} className="text-gray-400 hover:text-gray-600" title="Ocultar painel">

@@ -172,10 +172,28 @@ async function startServer() {
   });
 
   app.delete('/api/columns/:id', (req, res) => {
-    db.run("DELETE FROM columns WHERE id = ?", [req.params.id], (err) => {
+    const colId = req.params.id;
+    // Find another column to move chats to
+    db.get("SELECT id FROM columns WHERE id != ? ORDER BY position ASC LIMIT 1", [colId], (err, row: any) => {
       if (err) return res.status(500).json({ error: err.message });
-      io.emit('columns_updated');
-      res.json({ success: true });
+      
+      const targetColId = row ? row.id : null;
+      
+      if (targetColId) {
+        db.run("UPDATE chats SET column_id = ? WHERE column_id = ?", [targetColId, colId], (err) => {
+          if (err) return res.status(500).json({ error: err.message });
+          
+          db.run("DELETE FROM columns WHERE id = ?", [colId], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            io.emit('columns_updated');
+            io.emit('chat_updated'); // Trigger chat refresh
+            res.json({ success: true });
+          });
+        });
+      } else {
+        // Can't delete the last column
+        res.status(400).json({ error: 'Cannot delete the last column' });
+      }
     });
   });
 
@@ -261,6 +279,28 @@ async function startServer() {
       if (err) return res.status(500).json({ error: err.message });
       res.json(rows);
     });
+  });
+
+  app.post('/api/chats/:id/sync-profile-pic', async (req, res) => {
+    const chatId = req.params.id;
+    if (!waClient || waStatus !== 'connected') {
+      return res.status(400).json({ error: 'WhatsApp not connected' });
+    }
+    try {
+      const contact = await waClient.getContactById(chatId);
+      const profilePic = await contact.getProfilePicUrl();
+      if (profilePic) {
+        db.run("UPDATE chats SET profile_pic = ? WHERE id = ?", [profilePic, chatId], (err) => {
+          if (err) console.error('Error updating profile pic:', err);
+          io.emit('chat_updated', { id: chatId, profile_pic: profilePic });
+        });
+        res.json({ success: true, profile_pic: profilePic });
+      } else {
+        res.json({ success: false, error: 'No profile pic found' });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   app.post('/api/chats/:id/messages', upload.single('media'), async (req, res) => {
@@ -411,7 +451,7 @@ async function startServer() {
       setTimeout(initWhatsApp, 5000);
     });
 
-    waClient.on('message', async (msg) => {
+    waClient.on('message_create', async (msg) => {
       if (msg.isStatus) return;
       
       const chat = await msg.getChat();
@@ -423,6 +463,7 @@ async function startServer() {
       const phone = contact.number;
       let body = msg.body;
       const timestamp = msg.timestamp * 1000;
+      const fromMe = msg.fromMe ? 1 : 0;
 
       let mediaUrl = null;
       let mediaType = null;
@@ -478,31 +519,38 @@ async function startServer() {
         // ignore
       }
 
-      // Check if chat exists
-      db.get("SELECT id FROM chats WHERE id = ?", [chatId], (err, row) => {
-        if (!row) {
-          // New chat, put in first column
-          db.get("SELECT id FROM columns ORDER BY position ASC LIMIT 1", (err, colRow: any) => {
-            const colId = colRow ? colRow.id : 'col-1';
-            db.run("INSERT INTO chats (id, name, phone, column_id, last_message, last_message_time, unread_count, profile_pic) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
-              [chatId, name, phone, colId, displayBody, timestamp, profilePic], () => {
-                io.emit('new_chat', { id: chatId, name, phone, column_id: colId, last_message: displayBody, last_message_time: timestamp, unread_count: 1, profile_pic: profilePic });
-              });
-          });
-        } else {
-          // Update existing chat
-          db.run("UPDATE chats SET last_message = ?, last_message_time = ?, unread_count = unread_count + 1, profile_pic = ? WHERE id = ?",
-            [displayBody, timestamp, profilePic, chatId], () => {
-              io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: profilePic });
-            });
-        }
-      });
+      // Check if message already exists (e.g., sent from web UI)
+      db.get("SELECT id FROM messages WHERE id = ?", [msg.id.id], (err, row) => {
+        if (row) return; // Message already processed
 
-      // Save message
-      db.run("INSERT INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name, transcription) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [msg.id.id, chatId, body, 0, timestamp, mediaUrl, mediaType, mediaName, transcription], () => {
-          io.emit('new_message', { id: msg.id.id, chat_id: chatId, body, from_me: 0, timestamp, media_url: mediaUrl, media_type: mediaType, media_name: mediaName, transcription });
+        // Check if chat exists
+        db.get("SELECT id FROM chats WHERE id = ?", [chatId], (err, chatRow) => {
+          if (!chatRow) {
+            // New chat, put in first column
+            db.get("SELECT id FROM columns ORDER BY position ASC LIMIT 1", (err, colRow: any) => {
+              const colId = colRow ? colRow.id : 'col-1';
+              const unreadCount = fromMe ? 0 : 1;
+              db.run("INSERT INTO chats (id, name, phone, column_id, last_message, last_message_time, unread_count, profile_pic) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [chatId, name, phone, colId, displayBody, timestamp, unreadCount, profilePic], () => {
+                  io.emit('new_chat', { id: chatId, name, phone, column_id: colId, last_message: displayBody, last_message_time: timestamp, unread_count: unreadCount, profile_pic: profilePic });
+                });
+            });
+          } else {
+            // Update existing chat
+            const unreadUpdate = fromMe ? "" : ", unread_count = unread_count + 1";
+            db.run(`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?${unreadUpdate} WHERE id = ?`,
+              [displayBody, timestamp, profilePic, chatId], () => {
+                io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: profilePic });
+              });
+          }
         });
+
+        // Save message
+        db.run("INSERT INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name, transcription) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [msg.id.id, chatId, body, fromMe, timestamp, mediaUrl, mediaType, mediaName, transcription], () => {
+            io.emit('new_message', { id: msg.id.id, chat_id: chatId, body, from_me: fromMe, timestamp, media_url: mediaUrl, media_type: mediaType, media_name: mediaName, transcription });
+          });
+      });
     });
 
     waClient.initialize().catch(err => {
