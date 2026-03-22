@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
-import { QrCode, Smartphone, RefreshCw, Plus, MessageCircle, Settings, Tag as TagIcon, Menu, X, Edit2, XCircle } from 'lucide-react';
+import { QrCode, Smartphone, RefreshCw, Plus, MessageCircle, Settings, Tag as TagIcon, Menu, X, Edit2, XCircle, HardDrive, Image as ImageIcon, Download } from 'lucide-react';
 import { Column, Chat, Tag, Message } from './types';
 import { format } from 'date-fns';
 
@@ -42,6 +42,10 @@ export default function App() {
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
+  const [isMediaGalleryOpen, setIsMediaGalleryOpen] = useState(false);
+  const [storageSize, setStorageSize] = useState<number>(0);
+  const [mediaFiles, setMediaFiles] = useState<any[]>([]);
+  const [mediaSort, setMediaSort] = useState<'date' | 'size'>('date');
   const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([]);
   const [editingChatNameId, setEditingChatNameId] = useState<string | null>(null);
   const [editChatName, setEditChatName] = useState('');
@@ -149,6 +153,26 @@ export default function App() {
     };
   }, [selectedChat, isAuthenticated]);
 
+  const fetchStorage = async () => {
+    try {
+      const res = await apiFetch('/api/system/storage');
+      const data = await res.json();
+      setStorageSize(data.total_bytes);
+    } catch (e) {
+      console.error('Error fetching storage size:', e);
+    }
+  };
+
+  const fetchMedia = async () => {
+    try {
+      const res = await apiFetch('/api/media');
+      const data = await res.json();
+      setMediaFiles(data);
+    } catch (e) {
+      console.error('Error fetching media files:', e);
+    }
+  };
+
   const fetchData = async () => {
     try {
       const [colsRes, chatsRes, tagsRes, waRes] = await Promise.all([
@@ -168,6 +192,8 @@ export default function App() {
       else setQrCode('');
       if (waData.error) setWaError(waData.error);
       else setWaError('');
+
+      fetchStorage();
     } catch (error) {
       console.error('Error fetching data:', error);
     }
@@ -524,6 +550,28 @@ export default function App() {
               )}
             </div>
 
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 mt-6">Armazenamento</h2>
+            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <HardDrive size={16} className="text-blue-500" />
+                  <span className="text-sm font-medium">Espaço Usado</span>
+                </div>
+                <span className="text-sm font-bold text-gray-700">
+                  {(storageSize / (1024 * 1024)).toFixed(2)} MB
+                </span>
+              </div>
+              <button 
+                onClick={() => {
+                  fetchMedia();
+                  setIsMediaGalleryOpen(true);
+                }}
+                className="w-full mt-2 flex items-center justify-center gap-2 text-sm text-blue-600 bg-blue-50 py-2 rounded-md hover:bg-blue-100 transition-colors font-medium border border-blue-200"
+              >
+                <ImageIcon size={16} /> Galeria de Arquivos
+              </button>
+            </div>
+
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 mt-6">Filtro de Tags</h2>
             <div className="flex flex-wrap gap-1 mb-6">
               {tags.map(tag => {
@@ -686,12 +734,19 @@ export default function App() {
                   <div className="flex justify-between items-start mb-1">
                     <div className="flex items-center gap-2 overflow-hidden">
                       {chat.profile_pic ? (
-                        <img src={chat.profile_pic} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
-                      ) : (
-                        <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 flex-shrink-0">
-                          {chat.name ? chat.name.charAt(0).toUpperCase() : '?'}
-                        </div>
-                      )}
+                        <img 
+                          src={chat.profile_pic} 
+                          alt="" 
+                          className="w-8 h-8 rounded-full object-cover flex-shrink-0" 
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                          }}
+                        />
+                      ) : null}
+                      <div className={`w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 flex-shrink-0 ${chat.profile_pic ? 'hidden' : ''}`}>
+                        {chat.name ? chat.name.charAt(0).toUpperCase() : '?'}
+                      </div>
                       {editingChatNameId === chat.id ? (
                         <input
                           type="text"
@@ -798,12 +853,19 @@ export default function App() {
             <div className="flex justify-between items-start mb-2">
               <div className="flex items-center gap-3">
                 {selectedChat.profile_pic ? (
-                  <img src={selectedChat.profile_pic} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
-                ) : (
-                  <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 flex-shrink-0">
-                    {selectedChat.name ? selectedChat.name.charAt(0).toUpperCase() : '?'}
-                  </div>
-                )}
+                  <img 
+                    src={selectedChat.profile_pic} 
+                    alt="" 
+                    className="w-10 h-10 rounded-full object-cover flex-shrink-0" 
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                    }}
+                  />
+                ) : null}
+                <div className={`w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 flex-shrink-0 ${selectedChat.profile_pic ? 'hidden' : ''}`}>
+                  {selectedChat.name ? selectedChat.name.charAt(0).toUpperCase() : '?'}
+                </div>
                 <div>
                   <h3 className="font-bold text-gray-800">{selectedChat.name || selectedChat.phone}</h3>
                   <p className="text-xs text-gray-500">{selectedChat.phone}</p>
@@ -938,6 +1000,85 @@ export default function App() {
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"></path></svg>
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Media Gallery Modal */}
+      {isMediaGalleryOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <ImageIcon className="text-blue-500" />
+                <h2 className="text-lg font-bold text-gray-800">Galeria de Arquivos</h2>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-gray-500">Ordenar por:</span>
+                  <select 
+                    value={mediaSort} 
+                    onChange={(e) => setMediaSort(e.target.value as 'date' | 'size')}
+                    className="border border-gray-300 rounded px-2 py-1"
+                  >
+                    <option value="date">Mais recentes</option>
+                    <option value="size">Maior tamanho</option>
+                  </select>
+                </div>
+                <button onClick={() => setIsMediaGalleryOpen(false)} className="text-gray-500 hover:text-gray-700">
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-4 flex-1 overflow-y-auto bg-gray-50">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {[...mediaFiles].sort((a, b) => {
+                  if (mediaSort === 'date') return b.timestamp - a.timestamp;
+                  return b.size - a.size;
+                }).map(file => (
+                  <div key={file.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                    <div className="h-32 bg-gray-100 flex items-center justify-center relative group">
+                      {file.media_type?.startsWith('image/') ? (
+                        <img src={file.media_url} alt={file.media_name} className="w-full h-full object-cover" />
+                      ) : file.media_type?.startsWith('video/') ? (
+                        <video src={file.media_url} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="flex flex-col items-center text-gray-400">
+                          <HardDrive size={32} className="mb-2" />
+                          <span className="text-xs font-medium px-2 text-center break-all line-clamp-2">{file.media_name}</span>
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                        <a href={file.media_url} download={file.media_name} target="_blank" rel="noreferrer" className="bg-white text-gray-800 p-2 rounded-full hover:bg-blue-50 transition-colors">
+                          <Download size={20} />
+                        </a>
+                      </div>
+                    </div>
+                    <div className="p-3">
+                      <p className="text-xs font-semibold text-gray-800 truncate" title={file.chat_name || file.chat_phone}>
+                        {file.chat_name || file.chat_phone}
+                      </p>
+                      <div className="flex justify-between items-center mt-1">
+                        <span className="text-[10px] text-gray-500">
+                          {format(new Date(file.timestamp), "dd/MM/yy HH:mm")}
+                        </span>
+                        <span className="text-[10px] font-medium bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
+                          {(file.size / (1024 * 1024)).toFixed(2)} MB
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                
+                {mediaFiles.length === 0 && (
+                  <div className="col-span-full py-12 flex flex-col items-center justify-center text-gray-500">
+                    <ImageIcon size={48} className="text-gray-300 mb-4" />
+                    <p>Nenhum arquivo encontrado</p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

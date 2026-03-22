@@ -281,26 +281,52 @@ async function startServer() {
     });
   });
 
-  app.post('/api/chats/:id/sync-profile-pic', async (req, res) => {
-    const chatId = req.params.id;
-    if (!waClient || waStatus !== 'connected') {
-      return res.status(400).json({ error: 'WhatsApp not connected' });
-    }
+  app.get('/api/system/storage', (req, res) => {
     try {
-      const contact = await waClient.getContactById(chatId);
-      const profilePic = await contact.getProfilePicUrl();
-      if (profilePic) {
-        db.run("UPDATE chats SET profile_pic = ? WHERE id = ?", [profilePic, chatId], (err) => {
-          if (err) console.error('Error updating profile pic:', err);
-          io.emit('chat_updated', { id: chatId, profile_pic: profilePic });
-        });
-        res.json({ success: true, profile_pic: profilePic });
-      } else {
-        res.json({ success: false, error: 'No profile pic found' });
+      let totalSize = 0;
+      if (fs.existsSync(MEDIA_DIR)) {
+        const files = fs.readdirSync(MEDIA_DIR);
+        for (const file of files) {
+          const stats = fs.statSync(path.join(MEDIA_DIR, file));
+          totalSize += stats.size;
+        }
       }
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.json({ total_bytes: totalSize });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
+  });
+
+  app.get('/api/media', (req, res) => {
+    db.all(`
+      SELECT m.id, m.chat_id, m.media_url, m.media_type, m.media_name, m.timestamp, m.from_me, c.name as chat_name, c.phone as chat_phone
+      FROM messages m
+      JOIN chats c ON m.chat_id = c.id
+      WHERE m.media_url IS NOT NULL
+      ORDER BY m.timestamp DESC
+    `, (err, rows: any[]) => {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      const mediaFiles = rows.map(row => {
+        let size = 0;
+        if (row.media_url) {
+          try {
+            const filename = row.media_url.replace('/media/', '');
+            const filePath = path.join(MEDIA_DIR, filename);
+            const stats = fs.statSync(filePath);
+            size = stats.size;
+          } catch (e) {
+            // File might not exist
+          }
+        }
+        return {
+          ...row,
+          size
+        };
+      });
+      
+      res.json(mediaFiles);
+    });
   });
 
   app.post('/api/chats/:id/messages', upload.single('media'), async (req, res) => {
@@ -367,6 +393,77 @@ async function startServer() {
   let waQrCode = '';
   let waError = '';
 
+  const syncChatProfilePic = async (chatId: string) => {
+    if (!waClient || waStatus !== 'connected') return null;
+
+    try {
+      const contact = await waClient.getContactById(chatId);
+      const profilePic = await contact.getProfilePicUrl();
+
+      db.run(
+        "UPDATE chats SET profile_pic = ? WHERE id = ?",
+        [profilePic || null, chatId],
+        (err) => {
+          if (err) {
+            console.error(`Error updating profile pic for ${chatId}:`, err);
+            return;
+          }
+
+          io.emit('chat_updated', {
+            id: chatId,
+            profile_pic: profilePic || null
+          });
+        }
+      );
+
+      return profilePic || null;
+    } catch (error) {
+      console.error(`Error syncing profile picture for ${chatId}:`, error);
+      return null;
+    }
+  };
+
+  app.post('/api/chats/:id/sync-profile-pic', async (req, res) => {
+    const chatId = req.params.id;
+
+    if (!waClient || waStatus !== 'connected') {
+      return res.status(400).json({ error: 'WhatsApp not connected' });
+    }
+
+    try {
+      const profilePic = await syncChatProfilePic(chatId);
+
+      res.json({
+        success: true,
+        profile_pic: profilePic
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/chats/sync-all-profile-pics', async (req, res) => {
+    if (!waClient || waStatus !== 'connected') {
+      return res.status(400).json({ error: 'WhatsApp not connected' });
+    }
+
+    db.all("SELECT id FROM chats", async (err, rows: any[]) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+
+      try {
+        for (const row of rows) {
+          await syncChatProfilePic(row.id);
+        }
+
+        res.json({ success: true, total: rows.length });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+  });
+
   const initWhatsApp = () => {
     console.log('Initializing WhatsApp Client...');
     waStatus = 'initializing';
@@ -429,6 +526,17 @@ async function startServer() {
       waStatus = 'connected';
       waQrCode = '';
       io.emit('wa_status', { status: waStatus });
+
+      db.all("SELECT id FROM chats", async (err, rows: any[]) => {
+        if (err) {
+          console.error('Error loading chats for profile pic sync:', err);
+          return;
+        }
+
+        for (const row of rows) {
+          await syncChatProfilePic(row.id);
+        }
+      });
     });
 
     waClient.on('authenticated', () => {
@@ -512,11 +620,11 @@ async function startServer() {
 
       const displayBody = body || (mediaType ? `[Media: ${mediaType}]` : '');
 
-      let profilePic = null;
+      let profilePic: string | null = null;
       try {
         profilePic = await contact.getProfilePicUrl();
       } catch (e) {
-        // ignore
+        profilePic = null;
       }
 
       // Check if message already exists (e.g., sent from web UI)
