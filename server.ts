@@ -257,6 +257,26 @@ async function startServer() {
     });
   });
 
+  app.put('/api/tags/:id', (req, res) => {
+    const { name, color } = req.body;
+    db.run("UPDATE tags SET name = ?, color = ? WHERE id = ?", [name, color, req.params.id], (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      io.emit('tags_updated');
+      res.json({ success: true });
+    });
+  });
+
+  app.delete('/api/tags/:id', (req, res) => {
+    db.serialize(() => {
+      db.run("DELETE FROM chat_tags WHERE tag_id = ?", [req.params.id]);
+      db.run("DELETE FROM tags WHERE id = ?", [req.params.id], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        io.emit('tags_updated');
+        res.json({ success: true });
+      });
+    });
+  });
+
   app.post('/api/chats/:id/tags', (req, res) => {
     const { tag_id } = req.body;
     db.run("INSERT INTO chat_tags (chat_id, tag_id) VALUES (?, ?)", [req.params.id, tag_id], (err) => {

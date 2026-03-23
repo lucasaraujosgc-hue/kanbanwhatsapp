@@ -115,6 +115,10 @@ export default function App() {
   const [isAddingTag, setIsAddingTag] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState('#3b82f6');
+  
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [editTagName, setEditTagName] = useState('');
+  const [editTagColor, setEditTagColor] = useState('#3b82f6');
 
   const [chatToTag, setChatToTag] = useState<string | null>(null);
 
@@ -483,6 +487,36 @@ export default function App() {
     }
   };
 
+  const handleEditTag = async (id: string) => {
+    if (!editTagName.trim()) return;
+    try {
+      await apiFetch(`/api/tags/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editTagName,
+          color: editTagColor
+        })
+      });
+      setEditingTagId(null);
+    } catch (error) {
+      console.error('Error updating tag:', error);
+    }
+  };
+
+  const handleDeleteTag = async (id: string) => {
+    if (window.confirm('Tem certeza que deseja excluir esta tag? Ela será removida de todos os contatos.')) {
+      try {
+        await apiFetch(`/api/tags/${id}`, {
+          method: 'DELETE'
+        });
+        setEditingTagId(null);
+      } catch (error) {
+        console.error('Error deleting tag:', error);
+      }
+    }
+  };
+
   const handleAssignTag = async (chatId: string, tagId: string) => {
     try {
       await apiFetch(`/api/chats/${chatId}/tags`, {
@@ -719,9 +753,58 @@ export default function App() {
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Gerenciar Tags</h2>
             <div className="space-y-2">
               {tags.map(tag => (
-                <div key={tag.id} className="flex items-center gap-2 text-sm">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: tag.color }}></div>
-                  <span>{tag.name}</span>
+                <div key={tag.id} className="flex items-center justify-between text-sm group">
+                  {editingTagId === tag.id ? (
+                    <div className="flex-1 flex flex-col gap-2 p-2 bg-gray-50 border border-gray-200 rounded-md">
+                      <input
+                        type="text"
+                        value={editTagName}
+                        onChange={(e) => setEditTagName(e.target.value)}
+                        className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500"
+                        autoFocus
+                      />
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="color" 
+                          value={editTagColor} 
+                          onChange={(e) => setEditTagColor(e.target.value)}
+                          className="w-6 h-6 p-0 border-0 rounded cursor-pointer"
+                        />
+                        <span className="text-xs text-gray-500">Cor</span>
+                      </div>
+                      <div className="flex gap-1">
+                        <button onClick={() => handleEditTag(tag.id)} className="flex-1 bg-blue-600 text-white text-[10px] px-2 py-1 rounded hover:bg-blue-700">Salvar</button>
+                        <button onClick={() => setEditingTagId(null)} className="flex-1 bg-gray-200 text-gray-700 text-[10px] px-2 py-1 rounded hover:bg-gray-300">Cancelar</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: tag.color }}></div>
+                        <span>{tag.name}</span>
+                      </div>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => {
+                            setEditingTagId(tag.id);
+                            setEditTagName(tag.name);
+                            setEditTagColor(tag.color);
+                          }}
+                          className="text-gray-400 hover:text-blue-500 p-1"
+                          title="Editar tag"
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteTag(tag.id)}
+                          className="text-gray-400 hover:text-red-500 p-1"
+                          title="Excluir tag"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
               
