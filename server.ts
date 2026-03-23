@@ -471,7 +471,10 @@ async function startServer() {
       const chat = await waClient.getChatById(chatId);
       const chatContact = await chat.getContact();
       const name = chatContact.name || chatContact.pushname || chat.name || chatContact.number;
-      const profilePic = await getProfilePicUrl(waClient, chatId);
+      let profilePic = await getProfilePicUrl(waClient, chatId);
+      if (!profilePic) {
+        profilePic = await waClient.getProfilePicUrl(chatId).catch(() => null);
+      }
 
       db.run(
         "UPDATE chats SET profile_pic = ?, name = ? WHERE id = ?",
@@ -698,9 +701,15 @@ async function startServer() {
 
       let profilePic: string | null = null;
       try {
+        // Tenta buscar a foto atualizada
         profilePic = await getProfilePicUrl(waClient, chatId);
+        
+        // Se falhar no Puppeteer, tenta o método nativo do waClient como backup
+        if (!profilePic) {
+          profilePic = await waClient.getProfilePicUrl(chatId).catch(() => null);
+        }
       } catch (e) {
-        profilePic = null;
+        console.log("Erro ao recuperar foto para:", chatId);
       }
 
       // Check if message already exists (e.g., sent from web UI)
