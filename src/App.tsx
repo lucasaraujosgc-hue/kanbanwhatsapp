@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { QrCode, Smartphone, RefreshCw, Plus, MessageCircle, Settings, Tag as TagIcon, Menu, X, Edit2, XCircle, HardDrive, Image as ImageIcon, Download, Trash2, Play, Pause } from 'lucide-react';
 import { Column, Chat, Tag, Message } from './types';
@@ -127,6 +127,16 @@ export default function App() {
   const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([]);
   const [editingChatNameId, setEditingChatNameId] = useState<string | null>(null);
   const [editChatName, setEditChatName] = useState('');
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, selectedChat]);
 
   useEffect(() => {
     const savedPassword = localStorage.getItem('app_password') || sessionStorage.getItem('app_password');
@@ -1101,6 +1111,7 @@ export default function App() {
                 </div>
               </div>
             )}
+            <div ref={messagesEndRef} />
           </div>
           
           <div className="p-3 border-t border-gray-200 bg-gray-50 relative">
