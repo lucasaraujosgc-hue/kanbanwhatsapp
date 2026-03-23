@@ -848,6 +848,7 @@ export default function App() {
                           src={chat.profile_pic} 
                           alt="" 
                           className="w-8 h-8 rounded-full object-cover flex-shrink-0" 
+                          referrerPolicy="no-referrer"
                           onError={(e) => {
                             e.currentTarget.style.display = 'none';
                             e.currentTarget.nextElementSibling?.classList.remove('hidden');

@@ -470,7 +470,7 @@ async function startServer() {
     try {
       const chat = await waClient.getChatById(chatId);
       const chatContact = await chat.getContact();
-      const name = chatContact.name || chatContact.pushname || chat.name || chatContact.number;
+      const name = chat.name || chatContact.name || chatContact.pushname || chatContact.number;
       let profilePic = await getProfilePicUrl(waClient, chatId);
       if (!profilePic) {
         profilePic = await waClient.getProfilePicUrl(chatId).catch(() => null);
@@ -646,7 +646,7 @@ async function startServer() {
 
       const chatId = chat.id._serialized;
       const chatContact = await chat.getContact();
-      const name = chatContact.name || chatContact.pushname || chat.name || chatContact.number;
+      const name = chat.name || chatContact.name || chatContact.pushname || chatContact.number;
       const phone = chatContact.number;
       let body = msg.body;
       const timestamp = msg.timestamp * 1000;
@@ -716,7 +716,7 @@ async function startServer() {
       db.get("SELECT id FROM messages WHERE id = ?", [msg.id.id], (err, row) => {
         if (row) return; // Message already processed
 
-        db.get("SELECT id, profile_pic FROM chats WHERE id = ?", [chatId], (err, chatRow: any) => {
+        db.get("SELECT id, profile_pic FROM chats WHERE id = ? OR (phone = ? AND phone IS NOT NULL AND phone != '')", [chatId, phone], (err, chatRow: any) => {
           if (!chatRow) {
             // New chat, put in first column
             db.get("SELECT id FROM columns ORDER BY position ASC LIMIT 1", (err, colRow: any) => {
@@ -732,10 +732,27 @@ async function startServer() {
             const unreadUpdate = fromMe ? "" : ", unread_count = unread_count + 1";
             const finalProfilePic = profilePic || chatRow.profile_pic;
             
-            db.run(`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?, name = ?${unreadUpdate} WHERE id = ?`,
-              [displayBody, timestamp, finalProfilePic, name, chatId], () => {
-                io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name });
-              });
+            db.serialize(() => {
+              if (chatRow.id !== chatId) {
+                // ID changed (e.g., WhatsApp added 9th digit)
+                db.run("UPDATE chats SET id = ? WHERE id = ?", [chatId, chatRow.id]);
+                db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [chatId, chatRow.id]);
+                db.run("UPDATE chat_tags SET chat_id = ? WHERE chat_id = ?", [chatId, chatRow.id]);
+                io.emit('chat_deleted', { id: chatRow.id });
+                
+                // We will emit new_chat after the update below
+                db.get("SELECT * FROM chats WHERE id = ?", [chatId], (err, updatedChatRow: any) => {
+                  if (updatedChatRow) {
+                    io.emit('new_chat', updatedChatRow);
+                  }
+                });
+              }
+              
+              db.run(`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?, name = ?${unreadUpdate} WHERE id = ?`,
+                [displayBody, timestamp, finalProfilePic, name, chatId], () => {
+                  io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name });
+                });
+            });
           }
         });
 
