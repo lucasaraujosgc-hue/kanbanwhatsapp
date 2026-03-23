@@ -387,30 +387,104 @@ async function startServer() {
     }
   });
 
+  app.delete('/api/media/:id', (req, res) => {
+    const mediaId = req.params.id;
+    db.get("SELECT media_url FROM messages WHERE id = ?", [mediaId], (err, row: any) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!row || !row.media_url) return res.status(404).json({ error: 'Media not found' });
+      
+      const filename = row.media_url.replace('/media/', '');
+      const filePath = path.join(MEDIA_DIR, filename);
+      
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+      
+      db.run("UPDATE messages SET media_url = NULL, media_type = NULL, media_name = NULL WHERE id = ?", [mediaId], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true });
+      });
+    });
+  });
+
+  app.delete('/api/chats/:id', (req, res) => {
+    const chatId = req.params.id;
+    db.run("DELETE FROM messages WHERE chat_id = ?", [chatId], (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      db.run("DELETE FROM chat_tags WHERE chat_id = ?", [chatId], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        db.run("DELETE FROM chats WHERE id = ?", [chatId], (err) => {
+          if (err) return res.status(500).json({ error: err.message });
+          io.emit('chat_deleted', { id: chatId });
+          res.json({ success: true });
+        });
+      });
+    });
+  });
+
   // --- WhatsApp Client Setup ---
   let waClient: WAClient | null = null;
   let waStatus = 'disconnected';
   let waQrCode = '';
   let waError = '';
 
+  const getProfilePicUrl = async (client: any, contactId: string): Promise<string | null> => {
+    try {
+      const url = await client.pupPage.evaluate(async (id: string) => {
+        try {
+          const w = window as any;
+          // Try getting from Contact model first
+          const contact = w.Store.Contact.get(id);
+          if (contact && contact.profilePicThumbObj && contact.profilePicThumbObj.eurl) {
+            return contact.profilePicThumbObj.eurl;
+          }
+          
+          // Fallback to ProfilePic API
+          const chatWid = w.Store.WidFactory.createWid(id);
+          // Fix for the 'isNewsletter' error in newer WhatsApp Web versions
+          if (chatWid && typeof chatWid.isNewsletter === 'undefined') {
+            chatWid.isNewsletter = false;
+          }
+          
+          const res = w.compareWwebVersions(w.Debug.VERSION, '<', '2.3000.0')
+            ? await w.Store.ProfilePic.profilePicFind(chatWid)
+            : await w.Store.ProfilePic.requestProfilePicFromServer(chatWid);
+            
+          return res ? res.eurl : null;
+        } catch (err) {
+          return null;
+        }
+      }, contactId);
+      return url || null;
+    } catch (err) {
+      console.error(`Error getting profile pic for ${contactId}:`, err);
+      return null;
+    }
+  };
+
   const syncChatProfilePic = async (chatId: string) => {
     if (!waClient || waStatus !== 'connected') return null;
 
     try {
-      const contact = await waClient.getContactById(chatId);
-      const profilePic = await contact.getProfilePicUrl();
+      const chat = await waClient.getChatById(chatId);
+      const chatContact = await chat.getContact();
+      const name = chatContact.name || chatContact.pushname || chat.name || chatContact.number;
+      const profilePic = await getProfilePicUrl(waClient, chatId);
 
       db.run(
-        "UPDATE chats SET profile_pic = ? WHERE id = ?",
-        [profilePic || null, chatId],
+        "UPDATE chats SET profile_pic = ?, name = ? WHERE id = ?",
+        [profilePic || null, name, chatId],
         (err) => {
           if (err) {
-            console.error(`Error updating profile pic for ${chatId}:`, err);
+            console.error(`Error updating chat info for ${chatId}:`, err);
             return;
           }
 
           io.emit('chat_updated', {
             id: chatId,
+            name: name,
             profile_pic: profilePic || null
           });
         }
@@ -418,7 +492,7 @@ async function startServer() {
 
       return profilePic || null;
     } catch (error) {
-      console.error(`Error syncing profile picture for ${chatId}:`, error);
+      console.error(`Error syncing chat info for ${chatId}:`, error);
       return null;
     }
   };
@@ -455,6 +529,7 @@ async function startServer() {
       try {
         for (const row of rows) {
           await syncChatProfilePic(row.id);
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
         res.json({ success: true, total: rows.length });
@@ -535,6 +610,7 @@ async function startServer() {
 
         for (const row of rows) {
           await syncChatProfilePic(row.id);
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       });
     });
@@ -566,9 +642,9 @@ async function startServer() {
       if (chat.isGroup) return; // Ignore groups for now
 
       const chatId = chat.id._serialized;
-      const contact = await msg.getContact();
-      const name = contact.name || contact.pushname || contact.number;
-      const phone = contact.number;
+      const chatContact = await chat.getContact();
+      const name = chatContact.name || chatContact.pushname || chat.name || chatContact.number;
+      const phone = chatContact.number;
       let body = msg.body;
       const timestamp = msg.timestamp * 1000;
       const fromMe = msg.fromMe ? 1 : 0;
@@ -622,7 +698,7 @@ async function startServer() {
 
       let profilePic: string | null = null;
       try {
-        profilePic = await contact.getProfilePicUrl();
+        profilePic = await getProfilePicUrl(waClient, chatId);
       } catch (e) {
         profilePic = null;
       }
@@ -631,8 +707,7 @@ async function startServer() {
       db.get("SELECT id FROM messages WHERE id = ?", [msg.id.id], (err, row) => {
         if (row) return; // Message already processed
 
-        // Check if chat exists
-        db.get("SELECT id FROM chats WHERE id = ?", [chatId], (err, chatRow) => {
+        db.get("SELECT id, profile_pic FROM chats WHERE id = ?", [chatId], (err, chatRow: any) => {
           if (!chatRow) {
             // New chat, put in first column
             db.get("SELECT id FROM columns ORDER BY position ASC LIMIT 1", (err, colRow: any) => {
@@ -646,9 +721,11 @@ async function startServer() {
           } else {
             // Update existing chat
             const unreadUpdate = fromMe ? "" : ", unread_count = unread_count + 1";
-            db.run(`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?${unreadUpdate} WHERE id = ?`,
-              [displayBody, timestamp, profilePic, chatId], () => {
-                io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: profilePic });
+            const finalProfilePic = profilePic || chatRow.profile_pic;
+            
+            db.run(`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?, name = ?${unreadUpdate} WHERE id = ?`,
+              [displayBody, timestamp, finalProfilePic, name, chatId], () => {
+                io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name });
               });
           }
         });

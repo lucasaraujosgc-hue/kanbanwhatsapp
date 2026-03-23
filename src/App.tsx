@@ -1,10 +1,88 @@
 import React, { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
-import { QrCode, Smartphone, RefreshCw, Plus, MessageCircle, Settings, Tag as TagIcon, Menu, X, Edit2, XCircle, HardDrive, Image as ImageIcon, Download } from 'lucide-react';
+import { QrCode, Smartphone, RefreshCw, Plus, MessageCircle, Settings, Tag as TagIcon, Menu, X, Edit2, XCircle, HardDrive, Image as ImageIcon, Download, Trash2, Play, Pause } from 'lucide-react';
 import { Column, Chat, Tag, Message } from './types';
 import { format } from 'date-fns';
 
 const socket = io('/', { transports: ['websocket', 'polling'] });
+
+function AudioPlayer({ src }: { src: string }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const audioRef = React.useRef<HTMLAudioElement>(null);
+
+  const togglePlay = () => {
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (audioRef.current) {
+      setProgress((audioRef.current.currentTime / audioRef.current.duration) * 100);
+    }
+  };
+
+  const handleLoadedMetadata = () => {
+    if (audioRef.current) {
+      setDuration(audioRef.current.duration);
+    }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (audioRef.current) {
+      const newTime = (Number(e.target.value) / 100) * audioRef.current.duration;
+      audioRef.current.currentTime = newTime;
+      setProgress(Number(e.target.value));
+    }
+  };
+
+  const formatTime = (time: number) => {
+    if (isNaN(time)) return "0:00";
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  return (
+    <div className="flex items-center gap-2 bg-black/5 rounded-full p-2 min-w-[200px] w-full max-w-[300px]">
+      <button 
+        onClick={togglePlay} 
+        className="w-8 h-8 flex items-center justify-center bg-blue-500 text-white rounded-full hover:bg-blue-600 flex-shrink-0"
+      >
+        {isPlaying ? <Pause size={16} /> : <Play size={16} className="ml-1" />}
+      </button>
+      <div className="flex-1 flex flex-col justify-center">
+        <input 
+          type="range" 
+          min="0" 
+          max="100" 
+          value={progress || 0} 
+          onChange={handleSeek}
+          className="w-full h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-blue-500"
+        />
+        <div className="flex justify-between text-[10px] text-gray-500 mt-1 px-1">
+          <span>{formatTime(audioRef.current?.currentTime || 0)}</span>
+          <span>{formatTime(duration)}</span>
+        </div>
+      </div>
+      <audio 
+        ref={audioRef} 
+        src={src} 
+        onTimeUpdate={handleTimeUpdate} 
+        onLoadedMetadata={handleLoadedMetadata}
+        onEnded={() => { setIsPlaying(false); setProgress(0); }}
+        className="hidden"
+      />
+    </div>
+  );
+}
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -133,6 +211,12 @@ export default function App() {
     socket.on('tags_updated', fetchData);
     socket.on('chat_updated', fetchData);
     socket.on('new_chat', fetchData);
+    socket.on('chat_deleted', (data: { id: string }) => {
+      if (selectedChat?.id === data.id) {
+        setSelectedChat(null);
+      }
+      fetchData();
+    });
     socket.on('chat_tags_updated', fetchData);
 
     socket.on('new_message', (msg: Message) => {
@@ -223,6 +307,32 @@ export default function App() {
 
     if (!chat.profile_pic && waStatus === 'connected') {
       apiFetch(`/api/chats/${chat.id}/sync-profile-pic`, { method: 'POST' }).catch(console.error);
+    }
+  };
+
+  const handleDeleteChat = async (chatId: string) => {
+    if (window.confirm('Tem certeza que deseja excluir esta conversa? Todos os dados serão perdidos.')) {
+      try {
+        await apiFetch(`/api/chats/${chatId}`, { method: 'DELETE' });
+        if (selectedChat?.id === chatId) {
+          setSelectedChat(null);
+        }
+        fetchData();
+      } catch (error) {
+        console.error('Error deleting chat:', error);
+      }
+    }
+  };
+
+  const handleDeleteMedia = async (mediaId: string) => {
+    if (window.confirm('Tem certeza que deseja excluir este arquivo?')) {
+      try {
+        await apiFetch(`/api/media/${mediaId}`, { method: 'DELETE' });
+        fetchMedia();
+        fetchStorage();
+      } catch (error) {
+        console.error('Error deleting media:', error);
+      }
     }
   };
 
@@ -729,7 +839,7 @@ export default function App() {
                   onClick={() => handleChatSelect(chat)}
                   draggable
                   onDragStart={(e) => handleDragStart(e, chat.id)}
-                  className={`bg-white p-3 rounded-lg shadow-sm border cursor-pointer hover:shadow-md transition-shadow ${selectedChat?.id === chat.id ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`}
+                  className={`group bg-white p-3 rounded-lg shadow-sm border cursor-pointer hover:shadow-md transition-shadow ${selectedChat?.id === chat.id ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`}
                 >
                   <div className="flex justify-between items-start mb-1">
                     <div className="flex items-center gap-2 overflow-hidden">
@@ -741,6 +851,10 @@ export default function App() {
                           onError={(e) => {
                             e.currentTarget.style.display = 'none';
                             e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                            if (waStatus === 'connected' && !e.currentTarget.dataset.retried) {
+                              e.currentTarget.dataset.retried = 'true';
+                              apiFetch(`/api/chats/${chat.id}/sync-profile-pic`, { method: 'POST' }).catch(console.error);
+                            }
                           }}
                         />
                       ) : null}
@@ -797,9 +911,18 @@ export default function App() {
                         );
                       })}
                     </div>
-                    <span className="text-[10px] text-gray-400 flex-shrink-0 ml-2">
-                      {chat.last_message_time ? format(new Date(chat.last_message_time), 'HH:mm') : ''}
-                    </span>
+                    <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                      <span className="text-[10px] text-gray-400">
+                        {chat.last_message_time ? format(new Date(chat.last_message_time), 'HH:mm') : ''}
+                      </span>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.id); }}
+                        className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity"
+                        title="Excluir conversa"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -860,6 +983,10 @@ export default function App() {
                     onError={(e) => {
                       e.currentTarget.style.display = 'none';
                       e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                      if (waStatus === 'connected' && !e.currentTarget.dataset.retried) {
+                        e.currentTarget.dataset.retried = 'true';
+                        apiFetch(`/api/chats/${selectedChat.id}/sync-profile-pic`, { method: 'POST' }).catch(console.error);
+                      }
                     }}
                   />
                 ) : null}
@@ -872,10 +999,17 @@ export default function App() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => setIsRightSidebarOpen(false)} className="text-gray-400 hover:text-gray-600" title="Ocultar painel">
+                <button 
+                  onClick={() => handleDeleteChat(selectedChat.id)} 
+                  className="text-red-400 hover:text-red-600 p-1 rounded-md hover:bg-red-50 transition-colors" 
+                  title="Excluir conversa"
+                >
+                  <Trash2 size={20} />
+                </button>
+                <button onClick={() => setIsRightSidebarOpen(false)} className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100 transition-colors" title="Ocultar painel">
                   <Menu size={20} />
                 </button>
-                <button onClick={() => setSelectedChat(null)} className="text-gray-400 hover:text-gray-600" title="Fechar chat">
+                <button onClick={() => setSelectedChat(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100 transition-colors" title="Fechar chat">
                   <X size={20} />
                 </button>
               </div>
@@ -932,9 +1066,9 @@ export default function App() {
                     <div className="mb-2">
                       {msg.media_type?.startsWith('image/') ? (
                         <img src={msg.media_url} alt="Media" className="max-w-full rounded-md max-h-64 object-contain" />
-                      ) : msg.media_type?.startsWith('audio/') ? (
+                      ) : (msg.media_type?.startsWith('audio/') || msg.media_type?.includes('ogg')) ? (
                         <div className="flex flex-col gap-2">
-                          <audio controls src={msg.media_url} className="w-full max-w-[250px]" />
+                          <AudioPlayer src={msg.media_url} />
                           {msg.transcription && (
                             <div className="bg-white/50 p-2 rounded text-xs italic border border-gray-200">
                               <span className="font-semibold not-italic text-gray-600 block mb-1">Transcrição:</span>
@@ -1049,10 +1183,17 @@ export default function App() {
                           <span className="text-xs font-medium px-2 text-center break-all line-clamp-2">{file.media_name}</span>
                         </div>
                       )}
-                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
-                        <a href={file.media_url} download={file.media_name} target="_blank" rel="noreferrer" className="bg-white text-gray-800 p-2 rounded-full hover:bg-blue-50 transition-colors">
+                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
+                        <a href={file.media_url} download={file.media_name} target="_blank" rel="noreferrer" className="bg-white text-gray-800 p-2 rounded-full hover:bg-blue-50 transition-colors" title="Baixar">
                           <Download size={20} />
                         </a>
+                        <button 
+                          onClick={() => handleDeleteMedia(file.id)}
+                          className="bg-white text-red-500 p-2 rounded-full hover:bg-red-50 transition-colors"
+                          title="Excluir"
+                        >
+                          <Trash2 size={20} />
+                        </button>
                       </div>
                     </div>
                     <div className="p-3">
