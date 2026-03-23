@@ -469,8 +469,8 @@ async function startServer() {
 
     try {
       const chat = await waClient.getChatById(chatId);
-      const chatContact = await chat.getContact();
-      const name = chat.name || chatContact.name || chatContact.pushname || chatContact.number;
+      const contact = await chat.getContact();
+      const name = contact.name || contact.pushname || contact.number;
       let profilePic = await getProfilePicUrl(waClient, chatId);
       if (!profilePic) {
         profilePic = await waClient.getProfilePicUrl(chatId).catch(() => null);
@@ -645,9 +645,9 @@ async function startServer() {
       if (chat.isGroup) return; // Ignore groups for now
 
       const chatId = chat.id._serialized;
-      const chatContact = await chat.getContact();
-      const name = chat.name || chatContact.name || chatContact.pushname || chatContact.number;
-      const phone = chatContact.number;
+      const contact = await chat.getContact();
+      const name = contact.name || contact.pushname || contact.number;
+      const phone = contact.number;
       let body = msg.body;
       const timestamp = msg.timestamp * 1000;
       const fromMe = msg.fromMe ? 1 : 0;
