@@ -659,76 +659,45 @@ async function startServer() {
 
       if (msg.hasMedia) {
         try {
-          const rawType =
-            (msg as any)._data?.type ||
-            (msg as any).type ||
-            '';
+          const media = await msg.downloadMedia();
+          if (media) {
+            const ext = media.mimetype.split('/')[1].split(';')[0];
+            const filename = `${msg.id.id}.${ext}`;
+            const filepath = path.join(MEDIA_DIR, filename);
+            fs.writeFileSync(filepath, Buffer.from(media.data, 'base64'));
+            
+            mediaUrl = `/media/${filename}`;
+            mediaType = media.mimetype;
+            mediaName = media.filename || filename;
 
-          const webMediaType =
-            (msg as any)._data?.deprecatedMms3Url
-              ? 'media'
-              : (msg as any)._data?.mediaData?.type ||
-                (msg as any)._data?.mimetype ||
-                rawType;
-
-          // Ignora conteúdos interativos que quebram o downloadMedia()
-          if (rawType === 'interactive' || webMediaType === 'interactive') {
-            mediaType = 'interactive';
-            mediaName = 'interactive';
-          } else {
-            const media = await msg.downloadMedia();
-
-            if (media) {
-              const extFromMime = media.mimetype?.split('/')[1]?.split(';')[0];
-              const safeExt = extFromMime || 'bin';
-              const filename = `${msg.id.id}.${safeExt}`;
-              const filepath = path.join(MEDIA_DIR, filename);
-
-              fs.writeFileSync(filepath, Buffer.from(media.data, 'base64'));
-
-              mediaUrl = `/media/${filename}`;
-              mediaType = media.mimetype;
-              mediaName = media.filename || filename;
-
-              // Transcrever somente áudio real
-              if (media.mimetype?.startsWith('audio/') && process.env.GEMINI_API_KEY) {
-                try {
-                  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-                  const response = await ai.models.generateContent({
-                    model: 'gemini-3-flash-preview',
-                    contents: [
-                      {
-                        inlineData: {
-                          data: media.data,
-                          mimeType: media.mimetype,
-                        },
+            // Transcribe audio using Gemini
+            if (media.mimetype.startsWith('audio/') && process.env.GEMINI_API_KEY) {
+              try {
+                const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+                const response = await ai.models.generateContent({
+                  model: 'gemini-3-flash-preview',
+                  contents: [
+                    {
+                      inlineData: {
+                        data: media.data,
+                        mimeType: media.mimetype,
                       },
-                      'Transcreva este áudio em português. Retorne apenas a transcrição.',
-                    ],
-                  });
-                  transcription = response.text;
-                } catch (err) {
-                  console.error('Transcription error:', err);
-                }
+                    },
+                    'Transcreva este áudio em português. Retorne apenas a transcrição.',
+                  ],
+                });
+                transcription = response.text;
+              } catch (err) {
+                console.error('Transcription error:', err);
               }
             }
           }
-        } catch (err: any) {
+        } catch (err) {
           console.error('Error downloading media:', err);
-
-          // Evita quebrar o fluxo da mensagem por causa de mídia não suportada
-          mediaType = (msg as any)?._data?.type || 'unsupported';
-          mediaName = 'unsupported';
         }
       }
 
-      const displayBody =
-        body ||
-        (mediaType === 'interactive'
-          ? '[Mensagem interativa]'
-          : mediaType
-            ? `[Media: ${mediaType}]`
-            : '');
+      const displayBody = body || (mediaType ? `[Media: ${mediaType}]` : '');
 
       let profilePic: string | null = null;
       try {
