@@ -3,6 +3,8 @@ import { io } from 'socket.io-client';
 import { QrCode, Smartphone, RefreshCw, Plus, MessageCircle, Settings, Tag as TagIcon, Menu, X, Edit2, XCircle, HardDrive, Image as ImageIcon, Download, Trash2, Play, Pause, Bot, CheckCheck } from 'lucide-react';
 import { Column, Chat, Tag, Message } from './types';
 import { format, isSameDay, isToday, isYesterday } from 'date-fns';
+import { Rnd } from 'react-rnd';
+import Markdown from 'react-markdown';
 
 const socket = io('/', { transports: ['websocket', 'polling'] });
 
@@ -1394,68 +1396,111 @@ export default function App() {
       )}
 
       {/* Copilot FAB */}
-      <button
-        onClick={() => setIsCopilotOpen(!isCopilotOpen)}
-        className="fixed bottom-6 right-6 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 transition-colors z-50 flex items-center justify-center"
-        title="Copiloto IA"
-      >
-        <Bot size={24} />
-      </button>
+      {!isCopilotOpen && (
+        <Rnd
+          default={{
+            x: window.innerWidth - 90,
+            y: window.innerHeight - 90,
+            width: 64,
+            height: 64,
+          }}
+          enableResizing={false}
+          bounds="window"
+          className="z-50"
+        >
+          <button
+            onClick={() => setIsCopilotOpen(true)}
+            className="w-full h-full bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-colors flex items-center justify-center cursor-move"
+            title="Copiloto IA"
+          >
+            <Bot size={28} />
+          </button>
+        </Rnd>
+      )}
 
       {/* Copilot Chat Window */}
       {isCopilotOpen && (
-        <div className="fixed bottom-24 right-6 w-96 h-[500px] bg-white rounded-2xl shadow-2xl flex flex-col z-50 border border-gray-200 overflow-hidden">
-          <div className="bg-blue-600 text-white p-4 flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <Bot size={20} />
-              <h3 className="font-semibold">Copiloto IA</h3>
+        <Rnd
+          default={{
+            x: window.innerWidth - 400,
+            y: window.innerHeight - 600,
+            width: 384,
+            height: 500,
+          }}
+          minWidth={300}
+          minHeight={400}
+          bounds="window"
+          dragHandleClassName="copilot-header"
+          className="z-50"
+        >
+          <div className="w-full h-full bg-white rounded-2xl shadow-2xl flex flex-col border border-gray-200 overflow-hidden">
+            <div className="copilot-header bg-blue-600 text-white p-4 flex justify-between items-center cursor-move">
+              <div className="flex items-center gap-2">
+                <Bot size={20} />
+                <h3 className="font-semibold">Copiloto IA</h3>
+              </div>
+              <button 
+                onClick={() => setIsCopilotOpen(false)} 
+                className="hover:bg-blue-700 p-1 rounded transition-colors cursor-pointer"
+                onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+              >
+                <X size={20} />
+              </button>
             </div>
-            <button onClick={() => setIsCopilotOpen(false)} className="hover:bg-blue-700 p-1 rounded transition-colors">
-              <X size={20} />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
-            {copilotMessages.length === 0 && (
-              <div className="text-center text-gray-500 text-sm mt-4 italic">
-                Olá! Sou seu copiloto. Como posso ajudar com o dashboard hoje?
-              </div>
-            )}
-            {copilotMessages.map((msg, idx) => (
-              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] rounded-lg p-3 text-sm shadow-sm ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-white border border-gray-200 text-gray-800'}`}>
-                  <p className="whitespace-pre-wrap">{msg.text}</p>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+              {copilotMessages.length === 0 && (
+                <div className="text-center text-gray-500 text-sm mt-4 italic">
+                  Olá! Sou seu copiloto. Como posso ajudar com o dashboard hoje?
                 </div>
-              </div>
-            ))}
-            {isCopilotLoading && (
-              <div className="flex justify-start">
-                <div className="bg-white border border-gray-200 text-gray-800 rounded-lg p-3 text-sm flex gap-1 items-center shadow-sm">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+              )}
+              {copilotMessages.map((msg, idx) => (
+                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] rounded-lg p-3 text-sm shadow-sm ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-white border border-gray-200 text-gray-800'}`}>
+                    {msg.role === 'user' ? (
+                      <p className="whitespace-pre-wrap">{msg.text}</p>
+                    ) : (
+                      <div className="markdown-body prose prose-sm max-w-none">
+                        <Markdown>{msg.text}</Markdown>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-            <div ref={copilotMessagesEndRef} />
+              ))}
+              {isCopilotLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-white border border-gray-200 text-gray-800 rounded-lg p-3 text-sm flex gap-1 items-center shadow-sm">
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                  </div>
+                </div>
+              )}
+              <div ref={copilotMessagesEndRef} />
+            </div>
+            <form onSubmit={handleCopilotSubmit} className="p-3 border-t border-gray-200 bg-white flex gap-2">
+              <input
+                type="text"
+                value={copilotInput}
+                onChange={(e) => setCopilotInput(e.target.value)}
+                placeholder="Pergunte algo ao copiloto..."
+                className="flex-1 border border-gray-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                disabled={isCopilotLoading}
+                onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+              />
+              <button 
+                type="submit" 
+                disabled={isCopilotLoading || !copilotInput.trim()} 
+                className="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"></path></svg>
+              </button>
+            </form>
           </div>
-          <form onSubmit={handleCopilotSubmit} className="p-3 border-t border-gray-200 bg-white flex gap-2">
-            <input
-              type="text"
-              value={copilotInput}
-              onChange={(e) => setCopilotInput(e.target.value)}
-              placeholder="Pergunte algo ao copiloto..."
-              className="flex-1 border border-gray-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              disabled={isCopilotLoading}
-            />
-            <button 
-              type="submit" 
-              disabled={isCopilotLoading || !copilotInput.trim()} 
-              className="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"></path></svg>
-            </button>
-          </form>
-        </div>
+        </Rnd>
       )}
 
       {/* Zoomed Image Lightbox */}
