@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { io } from 'socket.io-client';
-import { QrCode, Smartphone, RefreshCw, Plus, MessageCircle, Settings, Tag as TagIcon, Menu, X, Edit2, XCircle, HardDrive, Image as ImageIcon, Download, Trash2, Play, Pause } from 'lucide-react';
+import { QrCode, Smartphone, RefreshCw, Plus, MessageCircle, Settings, Tag as TagIcon, Menu, X, Edit2, XCircle, HardDrive, Image as ImageIcon, Download, Trash2, Play, Pause, Bot, CheckCheck } from 'lucide-react';
 import { Column, Chat, Tag, Message } from './types';
-import { format } from 'date-fns';
+import { format, isSameDay, isToday, isYesterday } from 'date-fns';
 
 const socket = io('/', { transports: ['websocket', 'polling'] });
 
@@ -131,6 +131,14 @@ export default function App() {
   const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([]);
   const [editingChatNameId, setEditingChatNameId] = useState<string | null>(null);
   const [editChatName, setEditChatName] = useState('');
+
+  const [isCopilotOpen, setIsCopilotOpen] = useState(false);
+  const [copilotMessages, setCopilotMessages] = useState<{role: 'user' | 'model', text: string}[]>([]);
+  const [copilotInput, setCopilotInput] = useState('');
+  const [isCopilotLoading, setIsCopilotLoading] = useState(false);
+  const copilotMessagesEndRef = useRef<HTMLDivElement>(null);
+
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -580,6 +588,36 @@ export default function App() {
     await apiFetch('/api/wa/restart', { method: 'POST' });
   };
 
+  const handleCopilotSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!copilotInput.trim() || isCopilotLoading) return;
+
+    const userMsg = copilotInput.trim();
+    setCopilotInput('');
+    setCopilotMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    setIsCopilotLoading(true);
+
+    try {
+      const res = await apiFetch('/api/copilot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userMsg })
+      });
+      const data = await res.json();
+      
+      setCopilotMessages(prev => [...prev, { role: 'model', text: data.reply }]);
+    } catch (error) {
+      console.error('Error calling copilot:', error);
+      setCopilotMessages(prev => [...prev, { role: 'model', text: 'Desculpe, ocorreu um erro ao processar sua solicitação.' }]);
+    } finally {
+      setIsCopilotLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    copilotMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [copilotMessages, isCopilotLoading]);
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100 font-sans">
@@ -984,7 +1022,12 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-gray-500 truncate mb-2">{chat.last_message}</p>
+                  <p className="text-xs text-gray-500 truncate mb-2 flex items-center gap-1">
+                    {chat.last_message_from_me === 1 && (
+                      <CheckCheck size={14} className="text-blue-500 flex-shrink-0" />
+                    )}
+                    <span className="truncate">{chat.last_message}</span>
+                  </p>
                   
                   <div className="flex justify-between items-center mt-2">
                     <div className="flex flex-wrap gap-1">
@@ -1153,40 +1196,71 @@ export default function App() {
           </div>
           
           <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#e5ddd5]" onDrop={handleDrop} onDragOver={handleDragOver}>
-            {messages.map(msg => (
-              <div key={msg.id} className={`flex ${msg.from_me ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[80%] rounded-lg p-2 text-sm shadow-sm ${msg.from_me ? 'bg-[#dcf8c6] text-gray-800' : 'bg-white text-gray-800'}`}>
-                  {msg.media_url && (
-                    <div className="mb-2">
-                      {msg.media_type?.startsWith('image/') ? (
-                        <img src={msg.media_url} alt="Media" className="max-w-full rounded-md max-h-64 object-contain" />
-                      ) : (msg.media_type?.startsWith('audio/') || msg.media_type?.includes('ogg')) ? (
-                        <div className="flex flex-col gap-2">
-                          <AudioPlayer src={msg.media_url} />
-                          {msg.transcription && (
-                            <div className="bg-white/50 p-2 rounded text-xs italic border border-gray-200">
-                              <span className="font-semibold not-italic text-gray-600 block mb-1">Transcrição:</span>
-                              {msg.transcription}
-                            </div>
-                          )}
-                        </div>
-                      ) : msg.media_type?.startsWith('video/') ? (
-                        <video controls src={msg.media_url} className="max-w-full rounded-md max-h-64" />
-                      ) : (
-                        <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 bg-black/5 p-2 rounded hover:bg-black/10 transition-colors">
-                          <span className="text-2xl">📄</span>
-                          <span className="truncate max-w-[200px]">{msg.media_name || 'Documento'}</span>
-                        </a>
-                      )}
+            {messages.map((msg, index) => {
+              const currentMsgDate = new Date(msg.timestamp);
+              const prevMsgDate = index > 0 ? new Date(messages[index - 1].timestamp) : null;
+              const showDateSeparator = !prevMsgDate || !isSameDay(currentMsgDate, prevMsgDate);
+
+              let dateLabel = '';
+              if (showDateSeparator) {
+                if (isToday(currentMsgDate)) {
+                  dateLabel = 'Hoje';
+                } else if (isYesterday(currentMsgDate)) {
+                  dateLabel = 'Ontem';
+                } else {
+                  dateLabel = format(currentMsgDate, 'dd/MM/yyyy');
+                }
+              }
+
+              return (
+                <React.Fragment key={msg.id}>
+                  {showDateSeparator && (
+                    <div className="flex justify-center my-4">
+                      <span className="bg-[#e1f3fb] text-gray-600 text-xs px-3 py-1 rounded-lg shadow-sm">
+                        {dateLabel}
+                      </span>
                     </div>
                   )}
-                  {msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>}
-                  <span className="text-[10px] text-gray-500 block text-right mt-1">
-                    {format(new Date(msg.timestamp), 'HH:mm')}
-                  </span>
-                </div>
-              </div>
-            ))}
+                  <div className={`flex ${msg.from_me ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] rounded-lg p-2 text-sm shadow-sm ${msg.from_me ? 'bg-[#dcf8c6] text-gray-800' : 'bg-white text-gray-800'}`}>
+                      {msg.media_url && (
+                        <div className="mb-2">
+                          {msg.media_type?.startsWith('image/') ? (
+                            <img 
+                              src={msg.media_url} 
+                              alt="Media" 
+                              className="max-w-full rounded-md max-h-64 object-contain cursor-pointer" 
+                              onClick={() => setZoomedImage(msg.media_url!)}
+                            />
+                          ) : (msg.media_type?.startsWith('audio/') || msg.media_type?.includes('ogg')) ? (
+                            <div className="flex flex-col gap-2">
+                              <AudioPlayer src={msg.media_url} />
+                              {msg.transcription && (
+                                <div className="bg-white/50 p-2 rounded text-xs italic border border-gray-200">
+                                  <span className="font-semibold not-italic text-gray-600 block mb-1">Transcrição:</span>
+                                  {msg.transcription}
+                                </div>
+                              )}
+                            </div>
+                          ) : msg.media_type?.startsWith('video/') ? (
+                            <video controls src={msg.media_url} className="max-w-full rounded-md max-h-64" />
+                          ) : (
+                            <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 bg-black/5 p-2 rounded hover:bg-black/10 transition-colors">
+                              <span className="text-2xl">📄</span>
+                              <span className="truncate max-w-[200px]">{msg.media_name || 'Documento'}</span>
+                            </a>
+                          )}
+                        </div>
+                      )}
+                      {msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>}
+                      <span className="text-[10px] text-gray-500 block text-right mt-1">
+                        {format(new Date(msg.timestamp), 'HH:mm')}
+                      </span>
+                    </div>
+                  </div>
+                </React.Fragment>
+              );
+            })}
             {uploadingMedia && (
               <div className="flex justify-end">
                 <div className="bg-[#dcf8c6] text-gray-800 max-w-[80%] rounded-lg p-2 text-sm shadow-sm italic opacity-70">
@@ -1316,6 +1390,95 @@ export default function App() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Copilot FAB */}
+      <button
+        onClick={() => setIsCopilotOpen(!isCopilotOpen)}
+        className="fixed bottom-6 right-6 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 transition-colors z-50 flex items-center justify-center"
+        title="Copiloto IA"
+      >
+        <Bot size={24} />
+      </button>
+
+      {/* Copilot Chat Window */}
+      {isCopilotOpen && (
+        <div className="fixed bottom-24 right-6 w-96 h-[500px] bg-white rounded-2xl shadow-2xl flex flex-col z-50 border border-gray-200 overflow-hidden">
+          <div className="bg-blue-600 text-white p-4 flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <Bot size={20} />
+              <h3 className="font-semibold">Copiloto IA</h3>
+            </div>
+            <button onClick={() => setIsCopilotOpen(false)} className="hover:bg-blue-700 p-1 rounded transition-colors">
+              <X size={20} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+            {copilotMessages.length === 0 && (
+              <div className="text-center text-gray-500 text-sm mt-4 italic">
+                Olá! Sou seu copiloto. Como posso ajudar com o dashboard hoje?
+              </div>
+            )}
+            {copilotMessages.map((msg, idx) => (
+              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] rounded-lg p-3 text-sm shadow-sm ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-white border border-gray-200 text-gray-800'}`}>
+                  <p className="whitespace-pre-wrap">{msg.text}</p>
+                </div>
+              </div>
+            ))}
+            {isCopilotLoading && (
+              <div className="flex justify-start">
+                <div className="bg-white border border-gray-200 text-gray-800 rounded-lg p-3 text-sm flex gap-1 items-center shadow-sm">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                </div>
+              </div>
+            )}
+            <div ref={copilotMessagesEndRef} />
+          </div>
+          <form onSubmit={handleCopilotSubmit} className="p-3 border-t border-gray-200 bg-white flex gap-2">
+            <input
+              type="text"
+              value={copilotInput}
+              onChange={(e) => setCopilotInput(e.target.value)}
+              placeholder="Pergunte algo ao copiloto..."
+              className="flex-1 border border-gray-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              disabled={isCopilotLoading}
+            />
+            <button 
+              type="submit" 
+              disabled={isCopilotLoading || !copilotInput.trim()} 
+              className="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"></path></svg>
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* Zoomed Image Lightbox */}
+      {zoomedImage && (
+        <div 
+          className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 cursor-zoom-out"
+          onClick={() => setZoomedImage(null)}
+        >
+          <button 
+            className="absolute top-4 right-4 text-white hover:text-gray-300 transition-colors p-2"
+            onClick={(e) => {
+              e.stopPropagation();
+              setZoomedImage(null);
+            }}
+          >
+            <X size={32} />
+          </button>
+          <img 
+            src={zoomedImage} 
+            alt="Zoomed media" 
+            className="max-w-full max-h-full object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
     </div>

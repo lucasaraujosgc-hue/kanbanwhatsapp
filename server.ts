@@ -52,11 +52,15 @@ db.serialize(() => {
     last_message TEXT,
     last_message_time INTEGER,
     unread_count INTEGER DEFAULT 0,
-    profile_pic TEXT
+    profile_pic TEXT,
+    last_message_from_me INTEGER DEFAULT 0
   )`);
 
   // Try to add profile_pic column if it doesn't exist
   db.run(`ALTER TABLE chats ADD COLUMN profile_pic TEXT`, (err) => { /* ignore */ });
+  
+  // Try to add last_message_from_me column if it doesn't exist
+  db.run(`ALTER TABLE chats ADD COLUMN last_message_from_me INTEGER DEFAULT 0`, (err) => { /* ignore */ });
 
   db.run(`CREATE TABLE IF NOT EXISTS tags (
     id TEXT PRIMARY KEY,
@@ -146,6 +150,130 @@ async function startServer() {
   app.use('/api', checkPassword);
 
   // --- API Routes ---
+  app.post('/api/copilot', async (req, res) => {
+    const { message } = req.body;
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ reply: 'A chave da API do Gemini não está configurada.' });
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      
+      const chats = await new Promise<any[]>((resolve, reject) => {
+        db.all(`
+          SELECT c.id, c.name, c.phone, c.last_message, c.last_message_time, c.unread_count, col.name as column_name, GROUP_CONCAT(t.name) as tags
+          FROM chats c
+          LEFT JOIN columns col ON c.column_id = col.id
+          LEFT JOIN chat_tags ct ON c.id = ct.chat_id
+          LEFT JOIN tags t ON ct.tag_id = t.id
+          GROUP BY c.id
+        `, (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows);
+        });
+      });
+
+      const tags = await new Promise<any[]>((resolve, reject) => {
+        db.all("SELECT * FROM tags", (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows);
+        });
+      });
+
+      const recentMessages = await new Promise<any[]>((resolve, reject) => {
+        db.all(`
+          SELECT m.body, m.from_me, m.timestamp, c.name as chat_name
+          FROM messages m
+          JOIN chats c ON m.chat_id = c.id
+          ORDER BY m.timestamp DESC
+          LIMIT 100
+        `, (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows);
+        });
+      });
+
+      const systemInstruction = `Você deve funcionar como um “copiloto” do dashboard.
+==================================================
+OBJETIVO PRINCIPAL
+Seu objetivo é ajudar o operador humano a:
+Consultar dados de mensagens, contatos, tags e kanban
+Resumir conversas ou grupos de conversas em lote
+Sugerir respostas para clientes
+Classificar contextos operacionais
+Identificar pendências, urgências e ações sugeridas
+Traduzir pedidos em linguagem natural para intenções estruturadas
+Apoiar automações, SEM executar ações perigosas sem confirmação
+Você NÃO deve inventar dados.
+Você NÃO deve assumir que tem acesso direto ao banco.
+Você NÃO deve responder como se soubesse números, quantidades ou registros se eles não forem fornecidos pelo sistema.
+
+DADOS FORNECIDOS PELO SISTEMA NESTE MOMENTO:
+Tags existentes: ${JSON.stringify(tags)}
+Resumo dos Chats atuais: ${JSON.stringify(chats.map(c => ({
+  nome: c.name,
+  telefone: c.phone,
+  coluna: c.column_name,
+  tags: c.tags,
+  ultima_mensagem: c.last_message,
+  data_ultima_mensagem: new Date(c.last_message_time).toLocaleString('pt-BR')
+})))}
+Últimas 100 mensagens (contexto recente): ${JSON.stringify(recentMessages.map(m => ({
+  chat: m.chat_name,
+  enviado_por_mim: m.from_me === 1,
+  mensagem: m.body,
+  data: new Date(m.timestamp).toLocaleString('pt-BR')
+})))}
+
+==================================================
+COMPORTAMENTO GERAL
+Sempre que receber uma solicitação do usuário, você deve identificar qual é o tipo da solicitação.
+Os principais tipos são: CONSULTA, RESUMO, AÇÃO, SUGESTÃO DE RESPOSTA, CLASSIFICAÇÃO, FOLLOW-UP, TRIAGEM, COMANDO OPERACIONAL.
+Você deve interpretar o pedido do usuário e responder de forma objetiva, útil, operacional e profissional.
+Você deve sempre priorizar: clareza, precisão, segurança, economia de tokens, utilidade prática no contexto de escritório contábil.
+
+==================================================
+REGRA MAIS IMPORTANTE
+VOCÊ NÃO DEVE “ADIVINHAR” RESULTADOS DO SISTEMA.
+Se o usuário pedir algo que depende de dados reais do sistema que não estão nos DADOS FORNECIDOS acima, você deve converter isso em uma intenção estruturada (JSON) para o sistema executar. Ou seja: Você interpreta o pedido, mas NÃO inventa a resposta final se os dados ainda não foram consultados.
+
+MODO 1 — INTERPRETAÇÃO DE COMANDO
+Quando o usuário fizer uma pergunta ou ordem relacionada a dados do sistema que não estão no contexto, retorne JSON.
+Exemplo: Usuário: "Quantas mensagens recebi ontem?" -> Resposta esperada: "6 mensagens da tag y, 7 mensagens da tag x, 10 mensagens sem tags" (Se os dados estiverem no contexto, responda. Se não, retorne JSON).
+IMPORTANTE: Sempre que o pedido depender de dados do sistema, você deve preferir retornar JSON estruturado para que o backend execute a consulta.
+
+MODO 2 — ANÁLISE / RESUMO / RESPOSTA
+Quando o sistema já fornecer os dados para análise (como os DADOS FORNECIDOS acima), você deve responder em linguagem natural útil, clara e operacional.
+
+CASOS DE USO PRINCIPAIS: CONTAGEM E CONSULTA, RESUMO EM LOTE, SUGESTÃO DE RESPOSTA, CLASSIFICAÇÃO, AUTOMAÇÕES ASSISTIDAS.
+
+SEGURANÇA E CONTROLE: Você NUNCA deve executar automaticamente ações críticas sem confirmação explícita.
+RESPOSTAS AUTOMÁTICAS: Você NÃO deve recomendar resposta automática livre para temas sensíveis como: cálculo de imposto, interpretação tributária, demissão, rescisão, admissão, multa, enquadramento fiscal, obrigações legais específicas.
+ESTILO DE RESPOSTA: profissional, objetivo, claro, operacional, útil para ambiente de escritório contábil, sem floreios desnecessários.
+
+FORMATO DE SAÍDA:
+Se for pedido operacional que depende do sistema e não está no contexto: RETORNE JSON E NADA MAIS
+Se for pedido de análise de dados já fornecidos: RETORNE TEXTO CLARO E ÚTIL
+Se for pedido de sugestão de resposta: RETORNE SOMENTE A SUGESTÃO DE RESPOSTA
+Se for pedido de classificação: RETORNE JSON ESTRUTURADO
+
+REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilidade. Você não é um atendente do cliente final. Você é um copiloto interno do operador do sistema.`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: message,
+        config: {
+          systemInstruction: systemInstruction
+        }
+      });
+
+      res.json({ reply: response.text });
+    } catch (error) {
+      console.error('Copilot error:', error);
+      res.status(500).json({ reply: 'Erro ao processar a solicitação no copiloto.' });
+    }
+  });
+
   app.get('/api/columns', (req, res) => {
     db.all("SELECT * FROM columns ORDER BY position ASC", (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
@@ -384,7 +512,7 @@ async function startServer() {
         db.run("INSERT INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
           [msgId, chatId, body || '', 1, timestamp, mediaUrl, mediaType, mediaName]);
           
-        db.run("UPDATE chats SET last_message = ?, last_message_time = ? WHERE id = ?",
+        db.run("UPDATE chats SET last_message = ?, last_message_time = ?, last_message_from_me = 1 WHERE id = ?",
           [body || 'Media', timestamp, chatId]);
           
         io.emit('new_message', {
@@ -742,9 +870,9 @@ async function startServer() {
             db.get("SELECT id FROM columns ORDER BY position ASC LIMIT 1", (err, colRow: any) => {
               const colId = colRow ? colRow.id : 'col-1';
               const unreadCount = fromMe ? 0 : 1;
-              db.run("INSERT INTO chats (id, name, phone, column_id, last_message, last_message_time, unread_count, profile_pic) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                [chatId, name, phone, colId, displayBody, timestamp, unreadCount, profilePic], () => {
-                  io.emit('new_chat', { id: chatId, name, phone, column_id: colId, last_message: displayBody, last_message_time: timestamp, unread_count: unreadCount, profile_pic: profilePic });
+              db.run("INSERT INTO chats (id, name, phone, column_id, last_message, last_message_time, unread_count, profile_pic, last_message_from_me) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [chatId, name, phone, colId, displayBody, timestamp, unreadCount, profilePic, fromMe], () => {
+                  io.emit('new_chat', { id: chatId, name, phone, column_id: colId, last_message: displayBody, last_message_time: timestamp, unread_count: unreadCount, profile_pic: profilePic, last_message_from_me: fromMe });
                 });
             });
           } else {
@@ -768,9 +896,9 @@ async function startServer() {
                 });
               }
               
-              db.run(`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?, name = ?${unreadUpdate} WHERE id = ?`,
-                [displayBody, timestamp, finalProfilePic, name, chatId], () => {
-                  io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name });
+              db.run(`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?, name = ?, last_message_from_me = ?${unreadUpdate} WHERE id = ?`,
+                [displayBody, timestamp, finalProfilePic, name, fromMe, chatId], () => {
+                  io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name, last_message_from_me: fromMe });
                 });
             });
           }

@@ -21,6 +21,7 @@ export interface Chat {
   unread_count: number;
   tag_ids: string[];
   profile_pic?: string;
+  last_message_from_me?: number;
 }
 
 export interface Message {
