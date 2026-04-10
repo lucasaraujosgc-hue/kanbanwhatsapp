@@ -16,7 +16,7 @@ import { GoogleGenAI } from '@google/genai';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-let DATA_DIR = process.env.DATA_DIR || '/app/wp';
+let DATA_DIR = process.env.DATA_DIR || '/backup';
 try {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 } catch (e) {
