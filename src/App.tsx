@@ -146,11 +146,16 @@ export default function App() {
 
   const fetchAiMemories = async () => {
     try {
-      const res = await fetch('/api/ai_memory');
+      const res = await apiFetch('/api/ai_memory');
       const data = await res.json();
-      setAiMemories(data);
+      if (Array.isArray(data)) {
+        setAiMemories(data);
+      } else {
+        setAiMemories([]);
+      }
     } catch (e) {
       console.error('Error fetching AI memories:', e);
+      setAiMemories([]);
     }
   };
 
@@ -158,7 +163,7 @@ export default function App() {
     e.preventDefault();
     if (!newMemoryContent.trim()) return;
     try {
-      await fetch('/api/ai_memory', {
+      await apiFetch('/api/ai_memory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: newMemoryContent })
@@ -172,7 +177,7 @@ export default function App() {
 
   const handleDeleteMemory = async (id: number) => {
     try {
-      await fetch(`/api/ai_memory/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/ai_memory/${id}`, { method: 'DELETE' });
       fetchAiMemories();
     } catch (e) {
       console.error('Error deleting memory:', e);
