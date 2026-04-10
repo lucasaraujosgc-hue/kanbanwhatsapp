@@ -16,7 +16,7 @@ import { GoogleGenAI } from '@google/genai';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-let DATA_DIR = process.env.DATA_DIR || '/backup';
+let DATA_DIR = process.env.DATA_DIR || '/app/wp';
 try {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 } catch (e) {
@@ -72,6 +72,12 @@ db.serialize(() => {
     chat_id TEXT,
     tag_id TEXT,
     PRIMARY KEY (chat_id, tag_id)
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS ai_memory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT,
+    created_at INTEGER
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS messages (
@@ -252,7 +258,12 @@ RESPOSTAS AUTOMÁTICAS: Você NÃO deve recomendar resposta automática livre pa
 ESTILO DE RESPOSTA: profissional, objetivo, claro, operacional, útil para ambiente de escritório contábil, sem floreios desnecessários. Quando precisar destacar uma palavra ou frase, utilize sempre negrito com dois asteriscos (exemplo: **palavra**). Não utilize apenas um asterisco para destaque.
 
 FORMATO DE SAÍDA:
-Se for pedido operacional que depende do sistema e não está no contexto: RETORNE JSON E NADA MAIS
+Se o pedido for para executar uma ação (enviar mensagem, criar tag, adicionar tag), você DEVE retornar APENAS um JSON no seguinte formato, sem formatação markdown (sem \`\`\`json):
+Para enviar mensagem: {"command": "SEND_MESSAGE", "params": {"phone": "5511999999999", "message": "Texto da mensagem"}}
+Para criar tag: {"command": "CREATE_TAG", "params": {"name": "Nome da Tag"}}
+Para adicionar tag a um contato: {"command": "ADD_TAG", "params": {"phone": "5511999999999", "tag_name": "Nome da Tag"}}
+Para adicionar um lembrete/tarefa na memória: {"command": "ADD_MEMORY", "params": {"content": "Lembrar de ligar para o cliente X amanhã"}}
+
 Se for pedido de análise de dados já fornecidos: RETORNE TEXTO CLARO E ÚTIL
 Se for pedido de sugestão de resposta: RETORNE SOMENTE A SUGESTÃO DE RESPOSTA
 Se for pedido de classificação: RETORNE JSON ESTRUTURADO
@@ -267,7 +278,75 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         }
       });
 
-      res.json({ reply: response.text });
+      let replyText = response.text || '';
+      
+      // Try to parse command
+      try {
+        const cleanJson = replyText.replace(/```json/g, '').replace(/```/g, '').trim();
+        if (cleanJson.startsWith('{') && cleanJson.endsWith('}')) {
+          const cmd = JSON.parse(cleanJson);
+          
+          // Normalize command format
+          let command = cmd.command || cmd.intent || cmd.acao;
+          let params = cmd.params || cmd.parametros || {};
+          
+          if (command) {
+            if ((command === 'SEND_MESSAGE' || command === 'ENVIAR_MENSAGEM') && waClient && waStatus === 'connected') {
+              const phone = params.phone || params.telefone;
+              const msgText = params.message || params.mensagem;
+              const chatId = `${phone}@c.us`;
+              await waClient.sendMessage(chatId, msgText);
+              replyText = `✅ Mensagem enviada para ${phone}:\n"${msgText}"`;
+            } else if (command === 'CREATE_TAG' || command === 'CRIAR_TAG') {
+              const tagName = params.name || params.nome;
+              const tagId = `tag-${Date.now()}`;
+              const color = '#' + Math.floor(Math.random()*16777215).toString(16);
+              await new Promise((resolve) => {
+                db.run("INSERT INTO tags (id, name, color) VALUES (?, ?, ?)", [tagId, tagName, color], resolve);
+              });
+              io.emit('tags_updated');
+              replyText = `✅ Tag "${tagName}" criada com sucesso.`;
+            } else if (command === 'ADD_TAG') {
+              const phone = params.phone || params.contact_phone;
+              const tagName = params.tag_name || params.name;
+              // Find chat by phone
+              const chat: any = await new Promise((resolve) => {
+                db.get("SELECT id FROM chats WHERE phone = ?", [phone], (err, row) => resolve(row));
+              });
+              if (chat) {
+                // Find tag by name
+                const tag: any = await new Promise((resolve) => {
+                  db.get("SELECT id FROM tags WHERE name LIKE ?", [`%${tagName}%`], (err, row) => resolve(row));
+                });
+                if (tag) {
+                  await new Promise((resolve) => {
+                    db.run("INSERT OR IGNORE INTO chat_tags (chat_id, tag_id) VALUES (?, ?)", [chat.id, tag.id], resolve);
+                  });
+                  io.emit('chat_updated', { id: chat.id });
+                  replyText = `✅ Tag "${tagName}" adicionada ao contato.`;
+                } else {
+                  replyText = `❌ Tag "${tagName}" não encontrada.`;
+                }
+              } else {
+                replyText = `❌ Contato com telefone ${phone} não encontrado.`;
+              }
+            } else if (command === 'ADD_MEMORY') {
+              const content = params.content || params.conteudo;
+              await new Promise((resolve) => {
+                db.run("INSERT INTO ai_memory (content, created_at) VALUES (?, ?)", [content, Date.now()], resolve);
+              });
+              replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${content}"`;
+              if (waClient && waStatus === 'connected') {
+                await waClient.sendMessage('557591167094@c.us', `✅ Novo lembrete adicionado via Copiloto:\n"${content}"`);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // Not a JSON or not a valid command, just return the text
+      }
+
+      res.json({ reply: replyText });
     } catch (error) {
       console.error('Copilot error:', error);
       res.status(500).json({ reply: 'Erro ao processar a solicitação no copiloto.' });
@@ -373,6 +452,30 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
     db.all("SELECT * FROM tags", (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json(rows);
+    });
+  });
+
+  app.get('/api/ai_memory', (req, res) => {
+    db.all("SELECT * FROM ai_memory ORDER BY created_at DESC", (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(rows);
+    });
+  });
+
+  app.post('/api/ai_memory', (req, res) => {
+    const { content } = req.body;
+    if (!content) return res.status(400).json({ error: 'Content is required' });
+    
+    db.run("INSERT INTO ai_memory (content, created_at) VALUES (?, ?)", [content, Date.now()], function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ id: this.lastID, content, created_at: Date.now() });
+    });
+  });
+
+  app.delete('/api/ai_memory/:id', (req, res) => {
+    db.run("DELETE FROM ai_memory WHERE id = ?", [req.params.id], (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true });
     });
   });
 
@@ -580,27 +683,47 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
   const getProfilePicUrl = async (client: any, contactId: string): Promise<string | null> => {
     try {
+      // First try the native method
+      try {
+        const url = await client.getProfilePicUrl(contactId);
+        if (url) return url;
+      } catch (e) {
+        // Native method failed, fallback to evaluate
+      }
+
       const url = await client.pupPage.evaluate(async (id: string) => {
         try {
           const w = window as any;
-          // Try getting from Contact model first
-          const contact = w.Store.Contact.get(id);
-          if (contact && contact.profilePicThumbObj && contact.profilePicThumbObj.eurl) {
-            return contact.profilePicThumbObj.eurl;
-          }
           
-          // Fallback to ProfilePic API
-          const chatWid = w.Store.WidFactory.createWid(id);
-          // Fix for the 'isNewsletter' error in newer WhatsApp Web versions
-          if (chatWid && typeof chatWid.isNewsletter === 'undefined') {
-            chatWid.isNewsletter = false;
+          // Method 1: Store.ProfilePic.profilePicFind
+          if (w.Store && w.Store.ProfilePic && w.Store.ProfilePic.profilePicFind) {
+            const chatWid = w.Store.WidFactory.createWid(id);
+            if (chatWid && typeof chatWid.isNewsletter === 'undefined') {
+              chatWid.isNewsletter = false;
+            }
+            const res = await w.Store.ProfilePic.profilePicFind(chatWid);
+            if (res && res.eurl) return res.eurl;
           }
-          
-          const res = w.compareWwebVersions(w.Debug.VERSION, '<', '2.3000.0')
-            ? await w.Store.ProfilePic.profilePicFind(chatWid)
-            : await w.Store.ProfilePic.requestProfilePicFromServer(chatWid);
-            
-          return res ? res.eurl : null;
+
+          // Method 2: Store.ProfilePic.requestProfilePicFromServer
+          if (w.Store && w.Store.ProfilePic && w.Store.ProfilePic.requestProfilePicFromServer) {
+            const chatWid = w.Store.WidFactory.createWid(id);
+            if (chatWid && typeof chatWid.isNewsletter === 'undefined') {
+              chatWid.isNewsletter = false;
+            }
+            const res = await w.Store.ProfilePic.requestProfilePicFromServer(chatWid);
+            if (res && res.eurl) return res.eurl;
+          }
+
+          // Method 3: Contact model
+          if (w.Store && w.Store.Contact) {
+            const contact = w.Store.Contact.get(id);
+            if (contact && contact.profilePicThumbObj && contact.profilePicThumbObj.eurl) {
+              return contact.profilePicThumbObj.eurl;
+            }
+          }
+
+          return null;
         } catch (err) {
           return null;
         }
@@ -906,8 +1029,61 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
         // Save message
         db.run("INSERT INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name, transcription) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [msg.id.id, chatId, body, fromMe, timestamp, mediaUrl, mediaType, mediaName, transcription], () => {
+          [msg.id.id, chatId, body, fromMe, timestamp, mediaUrl, mediaType, mediaName, transcription], async () => {
             io.emit('new_message', { id: msg.id.id, chat_id: chatId, body, from_me: fromMe, timestamp, media_url: mediaUrl, media_type: mediaType, media_name: mediaName, transcription });
+            
+            // Check if message is from the specific number and not from me
+            if (phone === '557591167094' && !fromMe && process.env.GEMINI_API_KEY) {
+              try {
+                const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+                
+                // Fetch context
+                const aiMemory = await new Promise<any[]>((resolve) => {
+                  db.all("SELECT * FROM ai_memory ORDER BY created_at DESC", (err, rows) => resolve(rows || []));
+                });
+                
+                const systemInstruction = `Você é o assistente pessoal do usuário. Você está conversando com ele pelo WhatsApp.
+Sua memória atual (tarefas, lembretes, base de conhecimento):
+${JSON.stringify(aiMemory)}
+
+Se o usuário pedir para adicionar algo à sua memória, retorne APENAS o JSON:
+{"command": "ADD_MEMORY", "params": {"content": "O que deve ser lembrado"}}
+
+Caso contrário, responda de forma natural, útil e prestativa.`;
+
+                const response = await ai.models.generateContent({
+                  model: 'gemini-3-flash-preview',
+                  contents: body || transcription || 'Mensagem de mídia',
+                  config: {
+                    systemInstruction: systemInstruction
+                  }
+                });
+
+                let replyText = response.text || '';
+                
+                // Try to parse command
+                try {
+                  const cleanJson = replyText.replace(/```json/g, '').replace(/```/g, '').trim();
+                  if (cleanJson.startsWith('{') && cleanJson.endsWith('}')) {
+                    const cmd = JSON.parse(cleanJson);
+                    if (cmd.command === 'ADD_MEMORY') {
+                      await new Promise((resolve) => {
+                        db.run("INSERT INTO ai_memory (content, created_at) VALUES (?, ?)", [cmd.params.content, Date.now()], resolve);
+                      });
+                      replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${cmd.params.content}"`;
+                    }
+                  }
+                } catch (e) {
+                  // Not a JSON, just send the text
+                }
+
+                if (replyText) {
+                  await waClient.sendMessage(chatId, replyText);
+                }
+              } catch (err) {
+                console.error('Error processing AI message for 557591167094:', err);
+              }
+            }
           });
       });
     });

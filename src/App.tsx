@@ -140,6 +140,45 @@ export default function App() {
   const [isCopilotLoading, setIsCopilotLoading] = useState(false);
   const copilotMessagesEndRef = useRef<HTMLDivElement>(null);
 
+  const [isAiMemoryOpen, setIsAiMemoryOpen] = useState(false);
+  const [aiMemories, setAiMemories] = useState<any[]>([]);
+  const [newMemoryContent, setNewMemoryContent] = useState('');
+
+  const fetchAiMemories = async () => {
+    try {
+      const res = await fetch('/api/ai_memory');
+      const data = await res.json();
+      setAiMemories(data);
+    } catch (e) {
+      console.error('Error fetching AI memories:', e);
+    }
+  };
+
+  const handleAddMemory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMemoryContent.trim()) return;
+    try {
+      await fetch('/api/ai_memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: newMemoryContent })
+      });
+      setNewMemoryContent('');
+      fetchAiMemories();
+    } catch (e) {
+      console.error('Error adding memory:', e);
+    }
+  };
+
+  const handleDeleteMemory = async (id: number) => {
+    try {
+      await fetch(`/api/ai_memory/${id}`, { method: 'DELETE' });
+      fetchAiMemories();
+    } catch (e) {
+      console.error('Error deleting memory:', e);
+    }
+  };
+
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -763,6 +802,15 @@ export default function App() {
                 className="w-full mt-2 flex items-center justify-center gap-2 text-sm text-blue-600 bg-blue-50 py-2 rounded-md hover:bg-blue-100 transition-colors font-medium border border-blue-200"
               >
                 <ImageIcon size={16} /> Galeria de Arquivos
+              </button>
+              <button 
+                onClick={() => {
+                  fetchAiMemories();
+                  setIsAiMemoryOpen(true);
+                }}
+                className="w-full mt-2 flex items-center justify-center gap-2 text-sm text-purple-600 bg-purple-50 py-2 rounded-md hover:bg-purple-100 transition-colors font-medium border border-purple-200"
+              >
+                <Bot size={16} /> Base de Conhecimento IA
               </button>
             </div>
 
@@ -1524,6 +1572,72 @@ export default function App() {
             className="max-w-full max-h-full object-contain"
             onClick={(e) => e.stopPropagation()}
           />
+        </div>
+      )}
+
+      {/* AI Memory Modal */}
+      {isAiMemoryOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-purple-600 text-white rounded-t-xl">
+              <div className="flex items-center gap-2">
+                <Bot size={20} />
+                <h2 className="font-semibold text-lg">Base de Conhecimento IA (Secretário)</h2>
+              </div>
+              <button onClick={() => setIsAiMemoryOpen(false)} className="hover:bg-purple-700 p-1 rounded transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-4 border-b border-gray-200 bg-gray-50">
+              <form onSubmit={handleAddMemory} className="flex gap-2">
+                <input
+                  type="text"
+                  value={newMemoryContent}
+                  onChange={(e) => setNewMemoryContent(e.target.value)}
+                  placeholder="Adicionar nova tarefa, lembrete ou contexto para a IA..."
+                  className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                />
+                <button 
+                  type="submit"
+                  disabled={!newMemoryContent.trim()}
+                  className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors flex items-center gap-2"
+                >
+                  <Plus size={18} /> Adicionar
+                </button>
+              </form>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4">
+              {aiMemories.length === 0 ? (
+                <div className="text-center text-gray-500 mt-8">
+                  <Bot size={48} className="mx-auto mb-4 opacity-20" />
+                  <p>A base de conhecimento está vazia.</p>
+                  <p className="text-sm mt-2">Adicione lembretes, tarefas ou informações importantes para a IA usar como contexto.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {aiMemories.map((memory) => (
+                    <div key={memory.id} className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm flex justify-between items-start gap-4 group">
+                      <div className="flex-1">
+                        <p className="text-gray-800 whitespace-pre-wrap">{memory.content}</p>
+                        <p className="text-xs text-gray-400 mt-2">
+                          {new Date(memory.created_at).toLocaleString('pt-BR')}
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => handleDeleteMemory(memory.id)}
+                        className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                        title="Excluir"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
