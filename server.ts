@@ -47,6 +47,10 @@ aiDb.serialize(() => {
     content TEXT,
     created_at INTEGER
   )`);
+  
+  // Try to add new columns if they don't exist
+  aiDb.run(`ALTER TABLE ai_memory ADD COLUMN trigger_at INTEGER`, (err) => { /* ignore */ });
+  aiDb.run(`ALTER TABLE ai_memory ADD COLUMN is_triggered INTEGER DEFAULT 0`, (err) => { /* ignore */ });
 });
 
 // Initialize Database
@@ -172,7 +176,31 @@ async function startServer() {
 
   app.use('/api', checkPassword);
 
-  // --- API Routes ---
+  // --- Background Jobs ---
+setInterval(() => {
+  if (!waClient || waStatus !== 'connected') return;
+  
+  const now = Date.now();
+  aiDb.all("SELECT * FROM ai_memory WHERE trigger_at IS NOT NULL AND trigger_at <= ? AND is_triggered = 0", [now], (err, rows) => {
+    if (err) {
+      console.error('Error checking reminders:', err);
+      return;
+    }
+    
+    if (rows && rows.length > 0) {
+      rows.forEach(async (row: any) => {
+        try {
+          await waClient!.sendMessage('557591167094@c.us', `⏰ *LEMBRETE*\n\n${row.content}`);
+          aiDb.run("UPDATE ai_memory SET is_triggered = 1 WHERE id = ?", [row.id]);
+        } catch (e) {
+          console.error('Error sending reminder:', e);
+        }
+      });
+    }
+  });
+}, 60000); // Check every minute
+
+// --- API Routes ---
   app.post('/api/copilot', async (req, res) => {
     const { message } = req.body;
     if (!process.env.GEMINI_API_KEY) {
@@ -217,6 +245,8 @@ async function startServer() {
       });
 
       const systemInstruction = `Você deve funcionar como um “copiloto” do dashboard.
+Data e hora atual: ${new Date().toLocaleString('pt-BR')}
+
 ==================================================
 OBJETIVO PRINCIPAL
 Seu objetivo é ajudar o operador humano a:
@@ -279,7 +309,7 @@ Se o pedido for para executar uma ação (enviar mensagem, criar tag, adicionar 
 Para enviar mensagem: {"command": "SEND_MESSAGE", "params": {"phone": "5511999999999", "message": "Texto da mensagem"}}
 Para criar tag: {"command": "CREATE_TAG", "params": {"name": "Nome da Tag"}}
 Para adicionar tag a um contato: {"command": "ADD_TAG", "params": {"phone": "5511999999999", "tag_name": "Nome da Tag"}}
-Para adicionar um lembrete/tarefa na memória: {"command": "ADD_MEMORY", "params": {"content": "Lembrar de ligar para o cliente X amanhã"}}
+Para adicionar um lembrete/tarefa na memória: {"command": "ADD_MEMORY", "params": {"content": "Lembrar de ligar para o cliente X", "trigger_at": "2026-05-10T09:00:00"}} (trigger_at é opcional, use formato ISO 8601 se o usuário pedir para ser lembrado em uma data/hora específica)
 
 Se for pedido de análise de dados já fornecidos: RETORNE TEXTO CLARO E ÚTIL
 Se for pedido de sugestão de resposta: RETORNE SOMENTE A SUGESTÃO DE RESPOSTA
@@ -349,12 +379,27 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               }
             } else if (command === 'ADD_MEMORY') {
               const content = params.content || params.conteudo;
+              const triggerAtStr = params.trigger_at || params.data_alerta;
+              let triggerAt = null;
+              if (triggerAtStr) {
+                const parsedDate = new Date(triggerAtStr);
+                if (!isNaN(parsedDate.getTime())) {
+                  triggerAt = parsedDate.getTime();
+                }
+              }
+              
               await new Promise((resolve) => {
-                aiDb.run("INSERT INTO ai_memory (content, created_at) VALUES (?, ?)", [content, Date.now()], resolve);
+                aiDb.run("INSERT INTO ai_memory (content, created_at, trigger_at, is_triggered) VALUES (?, ?, ?, ?)", [content, Date.now(), triggerAt, 0], resolve);
               });
-              replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${content}"`;
+              
+              if (triggerAt) {
+                replyText = `✅ Lembrete agendado para ${new Date(triggerAt).toLocaleString('pt-BR')}:\n"${content}"`;
+              } else {
+                replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${content}"`;
+              }
+              
               if (waClient && waStatus === 'connected') {
-                await waClient.sendMessage('557591167094@c.us', `✅ Novo lembrete adicionado via Copiloto:\n"${content}"`);
+                await waClient.sendMessage('557591167094@c.us', `✅ Novo lembrete adicionado via Copiloto:\n"${content}"${triggerAt ? `\nAgendado para: ${new Date(triggerAt).toLocaleString('pt-BR')}` : ''}`);
               }
             }
           }
@@ -1060,11 +1105,13 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
                 });
                 
                 const systemInstruction = `Você é o assistente pessoal do usuário. Você está conversando com ele pelo WhatsApp.
+Data e hora atual: ${new Date().toLocaleString('pt-BR')}
+
 Sua memória atual (tarefas, lembretes, base de conhecimento):
 ${JSON.stringify(aiMemory)}
 
 Se o usuário pedir para adicionar algo à sua memória, retorne APENAS o JSON:
-{"command": "ADD_MEMORY", "params": {"content": "O que deve ser lembrado"}}
+{"command": "ADD_MEMORY", "params": {"content": "O que deve ser lembrado", "trigger_at": "2026-05-10T09:00:00"}} (trigger_at é opcional, use formato ISO 8601 se o usuário pedir para ser lembrado em uma data/hora específica)
 
 Caso contrário, responda de forma natural, útil e prestativa.`;
 
@@ -1084,10 +1131,24 @@ Caso contrário, responda de forma natural, útil e prestativa.`;
                   if (cleanJson.startsWith('{') && cleanJson.endsWith('}')) {
                     const cmd = JSON.parse(cleanJson);
                     if (cmd.command === 'ADD_MEMORY') {
+                      const triggerAtStr = cmd.params.trigger_at || cmd.params.data_alerta;
+                      let triggerAt = null;
+                      if (triggerAtStr) {
+                        const parsedDate = new Date(triggerAtStr);
+                        if (!isNaN(parsedDate.getTime())) {
+                          triggerAt = parsedDate.getTime();
+                        }
+                      }
+                      
                       await new Promise((resolve) => {
-                        aiDb.run("INSERT INTO ai_memory (content, created_at) VALUES (?, ?)", [cmd.params.content, Date.now()], resolve);
+                        aiDb.run("INSERT INTO ai_memory (content, created_at, trigger_at, is_triggered) VALUES (?, ?, ?, ?)", [cmd.params.content, Date.now(), triggerAt, 0], resolve);
                       });
-                      replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${cmd.params.content}"`;
+                      
+                      if (triggerAt) {
+                        replyText = `✅ Lembrete agendado para ${new Date(triggerAt).toLocaleString('pt-BR')}:\n"${cmd.params.content}"`;
+                      } else {
+                        replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${cmd.params.content}"`;
+                      }
                     }
                   }
                 } catch (e) {
