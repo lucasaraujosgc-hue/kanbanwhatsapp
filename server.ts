@@ -25,12 +25,29 @@ try {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
+const AI_DATA_DIR = '/app/wp';
+try {
+  if (!fs.existsSync(AI_DATA_DIR)) fs.mkdirSync(AI_DATA_DIR, { recursive: true });
+} catch (e) {
+  console.warn(`Could not create ${AI_DATA_DIR}`);
+}
+
 const MEDIA_DIR = path.join(DATA_DIR, 'media');
 if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
 const upload = multer({ dest: MEDIA_DIR });
 
 const db = new sqlite3.Database(path.join(DATA_DIR, 'kanban.db'));
+const aiDb = new sqlite3.Database(path.join(AI_DATA_DIR, 'ai_memory.db'));
+
+// Initialize AI Database
+aiDb.serialize(() => {
+  aiDb.run(`CREATE TABLE IF NOT EXISTS ai_memory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT,
+    created_at INTEGER
+  )`);
+});
 
 // Initialize Database
 db.serialize(() => {
@@ -333,7 +350,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
             } else if (command === 'ADD_MEMORY') {
               const content = params.content || params.conteudo;
               await new Promise((resolve) => {
-                db.run("INSERT INTO ai_memory (content, created_at) VALUES (?, ?)", [content, Date.now()], resolve);
+                aiDb.run("INSERT INTO ai_memory (content, created_at) VALUES (?, ?)", [content, Date.now()], resolve);
               });
               replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${content}"`;
               if (waClient && waStatus === 'connected') {
@@ -456,7 +473,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
   });
 
   app.get('/api/ai_memory', (req, res) => {
-    db.all("SELECT * FROM ai_memory ORDER BY created_at DESC", (err, rows) => {
+    aiDb.all("SELECT * FROM ai_memory ORDER BY created_at DESC", (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json(rows);
     });
@@ -466,14 +483,14 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
     const { content } = req.body;
     if (!content) return res.status(400).json({ error: 'Content is required' });
     
-    db.run("INSERT INTO ai_memory (content, created_at) VALUES (?, ?)", [content, Date.now()], function(err) {
+    aiDb.run("INSERT INTO ai_memory (content, created_at) VALUES (?, ?)", [content, Date.now()], function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id: this.lastID, content, created_at: Date.now() });
     });
   });
 
   app.delete('/api/ai_memory/:id', (req, res) => {
-    db.run("DELETE FROM ai_memory WHERE id = ?", [req.params.id], (err) => {
+    aiDb.run("DELETE FROM ai_memory WHERE id = ?", [req.params.id], (err) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ success: true });
     });
@@ -1039,7 +1056,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
                 
                 // Fetch context
                 const aiMemory = await new Promise<any[]>((resolve) => {
-                  db.all("SELECT * FROM ai_memory ORDER BY created_at DESC", (err, rows) => resolve(rows || []));
+                  aiDb.all("SELECT * FROM ai_memory ORDER BY created_at DESC", (err, rows) => resolve(rows || []));
                 });
                 
                 const systemInstruction = `Você é o assistente pessoal do usuário. Você está conversando com ele pelo WhatsApp.
@@ -1068,7 +1085,7 @@ Caso contrário, responda de forma natural, útil e prestativa.`;
                     const cmd = JSON.parse(cleanJson);
                     if (cmd.command === 'ADD_MEMORY') {
                       await new Promise((resolve) => {
-                        db.run("INSERT INTO ai_memory (content, created_at) VALUES (?, ?)", [cmd.params.content, Date.now()], resolve);
+                        aiDb.run("INSERT INTO ai_memory (content, created_at) VALUES (?, ?)", [cmd.params.content, Date.now()], resolve);
                       });
                       replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${cmd.params.content}"`;
                     }
