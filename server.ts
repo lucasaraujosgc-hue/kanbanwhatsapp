@@ -51,6 +51,15 @@ aiDb.serialize(() => {
   // Try to add new columns if they don't exist
   aiDb.run(`ALTER TABLE ai_memory ADD COLUMN trigger_at INTEGER`, (err) => { /* ignore */ });
   aiDb.run(`ALTER TABLE ai_memory ADD COLUMN is_triggered INTEGER DEFAULT 0`, (err) => { /* ignore */ });
+
+  aiDb.run(`CREATE TABLE IF NOT EXISTS scheduled_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone TEXT,
+    message TEXT,
+    trigger_at INTEGER,
+    is_triggered INTEGER DEFAULT 0,
+    created_at INTEGER
+  )`);
 });
 
 // Initialize Database
@@ -181,6 +190,8 @@ setInterval(() => {
   if (!waClient || waStatus !== 'connected') return;
   
   const now = Date.now();
+  
+  // Check reminders
   aiDb.all("SELECT * FROM ai_memory WHERE trigger_at IS NOT NULL AND trigger_at <= ? AND is_triggered = 0", [now], (err, rows) => {
     if (err) {
       console.error('Error checking reminders:', err);
@@ -194,6 +205,27 @@ setInterval(() => {
           aiDb.run("UPDATE ai_memory SET is_triggered = 1 WHERE id = ?", [row.id]);
         } catch (e) {
           console.error('Error sending reminder:', e);
+        }
+      });
+    }
+  });
+
+  // Check scheduled messages
+  aiDb.all("SELECT * FROM scheduled_messages WHERE trigger_at <= ? AND is_triggered = 0", [now], (err, rows) => {
+    if (err) {
+      console.error('Error checking scheduled messages:', err);
+      return;
+    }
+    
+    if (rows && rows.length > 0) {
+      rows.forEach(async (row: any) => {
+        try {
+          const chatId = `${row.phone}@c.us`;
+          await waClient!.sendMessage(chatId, row.message);
+          aiDb.run("UPDATE scheduled_messages SET is_triggered = 1 WHERE id = ?", [row.id]);
+          await waClient!.sendMessage('557591167094@c.us', `✅ *MENSAGEM AGENDADA ENVIADA*\n\nPara: ${row.phone}\nMensagem: ${row.message}`);
+        } catch (e) {
+          console.error('Error sending scheduled message:', e);
         }
       });
     }
@@ -305,8 +337,9 @@ RESPOSTAS AUTOMÁTICAS: Você NÃO deve recomendar resposta automática livre pa
 ESTILO DE RESPOSTA: profissional, objetivo, claro, operacional, útil para ambiente de escritório contábil, sem floreios desnecessários. Quando precisar destacar uma palavra ou frase, utilize sempre negrito com dois asteriscos (exemplo: **palavra**). Não utilize apenas um asterisco para destaque.
 
 FORMATO DE SAÍDA:
-Se o pedido for para executar uma ação (enviar mensagem, criar tag, adicionar tag), você DEVE retornar APENAS um JSON no seguinte formato, sem formatação markdown (sem \`\`\`json):
+Se o pedido for para executar uma ação (enviar mensagem, criar tag, adicionar tag, agendar mensagem), você DEVE retornar APENAS um JSON no seguinte formato, sem formatação markdown (sem \`\`\`json):
 Para enviar mensagem: {"command": "SEND_MESSAGE", "params": {"phone": "5511999999999", "message": "Texto da mensagem"}}
+Para agendar o envio de uma mensagem: {"command": "SCHEDULE_MESSAGE", "params": {"phone": "5511999999999", "message": "Texto da mensagem", "trigger_at": "2026-05-10T09:00:00"}} (trigger_at é obrigatório e deve estar no formato ISO 8601)
 Para criar tag: {"command": "CREATE_TAG", "params": {"name": "Nome da Tag"}}
 Para adicionar tag a um contato: {"command": "ADD_TAG", "params": {"phone": "5511999999999", "tag_name": "Nome da Tag"}}
 Para adicionar um lembrete/tarefa na memória: {"command": "ADD_MEMORY", "params": {"content": "Lembrar de ligar para o cliente X", "trigger_at": "2026-05-10T09:00:00"}} (trigger_at é opcional, use formato ISO 8601 se o usuário pedir para ser lembrado em uma data/hora específica)
@@ -344,6 +377,26 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               const chatId = `${phone}@c.us`;
               await waClient.sendMessage(chatId, msgText);
               replyText = `✅ Mensagem enviada para ${phone}:\n"${msgText}"`;
+            } else if (command === 'SCHEDULE_MESSAGE' || command === 'AGENDAR_MENSAGEM') {
+              const phone = params.phone || params.telefone;
+              const msgText = params.message || params.mensagem;
+              const triggerAtStr = params.trigger_at || params.data_alerta;
+              let triggerAt = null;
+              if (triggerAtStr) {
+                const parsedDate = new Date(triggerAtStr);
+                if (!isNaN(parsedDate.getTime())) {
+                  triggerAt = parsedDate.getTime();
+                }
+              }
+              
+              if (triggerAt && phone && msgText) {
+                await new Promise((resolve) => {
+                  aiDb.run("INSERT INTO scheduled_messages (phone, message, trigger_at, is_triggered, created_at) VALUES (?, ?, ?, ?, ?)", [phone, msgText, triggerAt, 0, Date.now()], resolve);
+                });
+                replyText = `✅ Mensagem agendada para ${new Date(triggerAt).toLocaleString('pt-BR')}:\nPara: ${phone}\n"${msgText}"`;
+              } else {
+                replyText = `❌ Erro ao agendar mensagem. Verifique se o telefone, mensagem e data/hora estão corretos.`;
+              }
             } else if (command === 'CREATE_TAG' || command === 'CRIAR_TAG') {
               const tagName = params.name || params.nome;
               const tagId = `tag-${Date.now()}`;
@@ -802,8 +855,17 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
     try {
       const chat = await waClient.getChatById(chatId);
-      const contact = await chat.getContact();
-      const name = contact.name || contact.pushname || contact.number;
+      let name = chat.name || '';
+      
+      try {
+        const contact = await chat.getContact();
+        if (contact) {
+          name = contact.name || contact.pushname || contact.number || name;
+        }
+      } catch (e) {
+        // Ignore error for @lid contacts or other special contacts
+      }
+      
       let profilePic = await getProfilePicUrl(waClient, chatId);
       if (!profilePic) {
         profilePic = await waClient.getProfilePicUrl(chatId).catch(() => null);
@@ -1113,6 +1175,12 @@ ${JSON.stringify(aiMemory)}
 Se o usuário pedir para adicionar algo à sua memória, retorne APENAS o JSON:
 {"command": "ADD_MEMORY", "params": {"content": "O que deve ser lembrado", "trigger_at": "2026-05-10T09:00:00"}} (trigger_at é opcional, use formato ISO 8601 se o usuário pedir para ser lembrado em uma data/hora específica)
 
+Se o usuário pedir para enviar uma mensagem para alguém, retorne APENAS o JSON:
+{"command": "SEND_MESSAGE", "params": {"phone": "5511999999999", "message": "Texto da mensagem"}}
+
+Se o usuário pedir para agendar o envio de uma mensagem para alguém, retorne APENAS o JSON:
+{"command": "SCHEDULE_MESSAGE", "params": {"phone": "5511999999999", "message": "Texto da mensagem", "trigger_at": "2026-05-10T09:00:00"}} (trigger_at é obrigatório e deve estar no formato ISO 8601)
+
 Caso contrário, responda de forma natural, útil e prestativa.`;
 
                 const response = await ai.models.generateContent({
@@ -1148,6 +1216,36 @@ Caso contrário, responda de forma natural, útil e prestativa.`;
                         replyText = `✅ Lembrete agendado para ${new Date(triggerAt).toLocaleString('pt-BR')}:\n"${cmd.params.content}"`;
                       } else {
                         replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${cmd.params.content}"`;
+                      }
+                    } else if (cmd.command === 'SEND_MESSAGE') {
+                      const phone = cmd.params.phone;
+                      const msgText = cmd.params.message;
+                      if (phone && msgText && waClient && waStatus === 'connected') {
+                        const targetChatId = `${phone}@c.us`;
+                        await waClient.sendMessage(targetChatId, msgText);
+                        replyText = `✅ Mensagem enviada para ${phone}:\n"${msgText}"`;
+                      } else {
+                        replyText = `❌ Erro ao enviar mensagem. Verifique se o telefone e a mensagem estão corretos.`;
+                      }
+                    } else if (cmd.command === 'SCHEDULE_MESSAGE') {
+                      const phone = cmd.params.phone;
+                      const msgText = cmd.params.message;
+                      const triggerAtStr = cmd.params.trigger_at;
+                      let triggerAt = null;
+                      if (triggerAtStr) {
+                        const parsedDate = new Date(triggerAtStr);
+                        if (!isNaN(parsedDate.getTime())) {
+                          triggerAt = parsedDate.getTime();
+                        }
+                      }
+                      
+                      if (triggerAt && phone && msgText) {
+                        await new Promise((resolve) => {
+                          aiDb.run("INSERT INTO scheduled_messages (phone, message, trigger_at, is_triggered, created_at) VALUES (?, ?, ?, ?, ?)", [phone, msgText, triggerAt, 0, Date.now()], resolve);
+                        });
+                        replyText = `✅ Mensagem agendada para ${new Date(triggerAt).toLocaleString('pt-BR')}:\nPara: ${phone}\n"${msgText}"`;
+                      } else {
+                        replyText = `❌ Erro ao agendar mensagem. Verifique se o telefone, mensagem e data/hora estão corretos.`;
                       }
                     }
                   }
