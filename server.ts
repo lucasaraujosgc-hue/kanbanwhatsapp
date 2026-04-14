@@ -12,6 +12,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { GoogleGenAI } from '@google/genai';
+import axios from 'axios';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -277,7 +278,7 @@ setInterval(() => {
       });
 
       const systemInstruction = `Você deve funcionar como um “copiloto” do dashboard.
-Data e hora atual: ${new Date().toLocaleString('pt-BR')}
+Data e hora atual: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
 
 ==================================================
 OBJETIVO PRINCIPAL
@@ -301,13 +302,13 @@ Resumo dos Chats atuais: ${JSON.stringify(chats.map(c => ({
   coluna: c.column_name,
   tags: c.tags,
   ultima_mensagem: c.last_message,
-  data_ultima_mensagem: new Date(c.last_message_time).toLocaleString('pt-BR')
+  data_ultima_mensagem: new Date(c.last_message_time).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 })))}
 Últimas 100 mensagens (contexto recente): ${JSON.stringify(recentMessages.map(m => ({
   chat: m.chat_name,
   enviado_por_mim: m.from_me === 1,
   mensagem: m.body,
-  data: new Date(m.timestamp).toLocaleString('pt-BR')
+  data: new Date(m.timestamp).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 })))}
 
 ==================================================
@@ -393,7 +394,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
                 await new Promise((resolve) => {
                   aiDb.run("INSERT INTO scheduled_messages (phone, message, trigger_at, is_triggered, created_at) VALUES (?, ?, ?, ?, ?)", [phone, msgText, triggerAt, 0, Date.now()], resolve);
                 });
-                replyText = `✅ Mensagem agendada para ${new Date(triggerAt).toLocaleString('pt-BR')}:\nPara: ${phone}\n"${msgText}"`;
+                replyText = `✅ Mensagem agendada para ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\nPara: ${phone}\n"${msgText}"`;
               } else {
                 replyText = `❌ Erro ao agendar mensagem. Verifique se o telefone, mensagem e data/hora estão corretos.`;
               }
@@ -446,13 +447,13 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               });
               
               if (triggerAt) {
-                replyText = `✅ Lembrete agendado para ${new Date(triggerAt).toLocaleString('pt-BR')}:\n"${content}"`;
+                replyText = `✅ Lembrete agendado para ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\n"${content}"`;
               } else {
                 replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${content}"`;
               }
               
               if (waClient && waStatus === 'connected') {
-                await waClient.sendMessage('557591167094@c.us', `✅ Novo lembrete adicionado via Copiloto:\n"${content}"${triggerAt ? `\nAgendado para: ${new Date(triggerAt).toLocaleString('pt-BR')}` : ''}`);
+                await waClient.sendMessage('557591167094@c.us', `✅ Novo lembrete adicionado via Copiloto:\n"${content}"${triggerAt ? `\nAgendado para: ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}` : ''}`);
               }
             }
           }
@@ -850,6 +851,24 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
     }
   };
 
+  const downloadProfilePic = async (url: string, chatId: string) => {
+    try {
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer'
+      });
+
+      const filename = `profile_${chatId}.jpg`;
+      const filepath = path.join(MEDIA_DIR, filename);
+
+      fs.writeFileSync(filepath, response.data);
+
+      return `/media/${filename}`;
+    } catch (err) {
+      console.error('Erro ao baixar foto:', err);
+      return null;
+    }
+  };
+
   const syncChatProfilePic = async (chatId: string) => {
     if (!waClient || waStatus !== 'connected') return null;
 
@@ -866,9 +885,14 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         // Ignore error for @lid contacts or other special contacts
       }
       
-      let profilePic = await getProfilePicUrl(waClient, chatId);
-      if (!profilePic) {
-        profilePic = await waClient.getProfilePicUrl(chatId).catch(() => null);
+      let profilePicUrl = await getProfilePicUrl(waClient, chatId);
+      if (!profilePicUrl) {
+        profilePicUrl = await waClient.getProfilePicUrl(chatId).catch(() => null);
+      }
+
+      let profilePic = null;
+      if (profilePicUrl) {
+        profilePic = await downloadProfilePic(profilePicUrl, chatId);
       }
 
       db.run(
@@ -1097,11 +1121,15 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       let profilePic: string | null = null;
       try {
         // Tenta buscar a foto atualizada
-        profilePic = await getProfilePicUrl(waClient, chatId);
+        let profilePicUrl = await getProfilePicUrl(waClient, chatId);
         
         // Se falhar no Puppeteer, tenta o método nativo do waClient como backup
-        if (!profilePic) {
-          profilePic = await waClient.getProfilePicUrl(chatId).catch(() => null);
+        if (!profilePicUrl) {
+          profilePicUrl = await waClient.getProfilePicUrl(chatId).catch(() => null);
+        }
+
+        if (profilePicUrl) {
+          profilePic = await downloadProfilePic(profilePicUrl, chatId);
         }
       } catch (e) {
         console.log("Erro ao recuperar foto para:", chatId);
@@ -1213,7 +1241,7 @@ Caso contrário, responda de forma natural, útil e prestativa.`;
                       });
                       
                       if (triggerAt) {
-                        replyText = `✅ Lembrete agendado para ${new Date(triggerAt).toLocaleString('pt-BR')}:\n"${cmd.params.content}"`;
+                        replyText = `✅ Lembrete agendado para ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\n"${cmd.params.content}"`;
                       } else {
                         replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${cmd.params.content}"`;
                       }
@@ -1243,7 +1271,7 @@ Caso contrário, responda de forma natural, útil e prestativa.`;
                         await new Promise((resolve) => {
                           aiDb.run("INSERT INTO scheduled_messages (phone, message, trigger_at, is_triggered, created_at) VALUES (?, ?, ?, ?, ?)", [phone, msgText, triggerAt, 0, Date.now()], resolve);
                         });
-                        replyText = `✅ Mensagem agendada para ${new Date(triggerAt).toLocaleString('pt-BR')}:\nPara: ${phone}\n"${msgText}"`;
+                        replyText = `✅ Mensagem agendada para ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\nPara: ${phone}\n"${msgText}"`;
                       } else {
                         replyText = `❌ Erro ao agendar mensagem. Verifique se o telefone, mensagem e data/hora estão corretos.`;
                       }

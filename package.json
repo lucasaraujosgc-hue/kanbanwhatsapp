@@ -16,6 +16,7 @@
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "axios": "^1.15.0",
     "clsx": "^2.1.1",
     "cors": "^2.8.6",
     "date-fns": "^4.1.0",
