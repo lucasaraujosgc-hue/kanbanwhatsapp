@@ -851,20 +851,37 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
     }
   };
 
-  const downloadProfilePic = async (url: string, chatId: string) => {
+  const downloadProfilePic = async (url: string, chatId: string): Promise<string | null> => {
     try {
-      const response = await axios.get(url, {
-        responseType: 'arraybuffer'
-      });
+      if (!waClient || !waClient.pupPage) return null;
 
-      const filename = `profile_${chatId}.jpg`;
+      // Usa o browser do Puppeteer (que tem a sessão do WhatsApp) para baixar a imagem
+      const base64Data = await waClient.pupPage.evaluate(async (imgUrl: string) => {
+        try {
+          const res = await fetch(imgUrl, { credentials: 'include' });
+          if (!res.ok) return null;
+          const buffer = await res.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          let binary = '';
+          for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          return btoa(binary);
+        } catch (e) {
+          return null;
+        }
+      }, url);
+
+      if (!base64Data) return null;
+
+      const safeId = chatId.replace(/[@.]/g, '_');
+      const filename = `profile_${safeId}.jpg`;
       const filepath = path.join(MEDIA_DIR, filename);
-
-      fs.writeFileSync(filepath, response.data);
+      fs.writeFileSync(filepath, Buffer.from(base64Data, 'base64'));
 
       return `/media/${filename}`;
     } catch (err) {
-      console.error('Erro ao baixar foto:', err);
+      console.error(`Erro ao baixar foto de perfil (${chatId}):`, err);
       return null;
     }
   };

@@ -723,37 +723,37 @@ export default function App() {
   });
 
   return (
-    <div className="flex h-screen bg-gray-100 font-sans overflow-hidden">
+    <div className="flex h-screen bg-slate-50 font-sans overflow-hidden">
       {/* Sidebar / Settings */}
       {isSidebarOpen && (
-        <div className="w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
-          <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+        <div className="w-64 bg-white border-r border-slate-200 shadow-[2px_0_8px_-4px_rgba(0,0,0,0.1)] flex flex-col flex-shrink-0 z-10">
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <MessageCircle className="text-green-500" />
-              <h1 className="font-bold text-lg text-gray-800">WhatsKanban</h1>
+              <MessageCircle className="text-emerald-500" />
+              <h1 className="font-bold text-lg text-slate-800 tracking-tight">WhatsKanban</h1>
             </div>
-            <button onClick={() => setIsSidebarOpen(false)} className="text-gray-500 hover:text-gray-700">
+            <button onClick={() => setIsSidebarOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
               <X size={20} />
             </button>
           </div>
           
-          <div className="p-4 border-b border-gray-200">
+          <div className="p-4 border-b border-slate-100">
             <input
               type="text"
               placeholder="Buscar chats..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-shadow bg-slate-50"
             />
           </div>
           
-          <div className="p-4 flex-1 overflow-y-auto">
-            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Conexão WhatsApp</h2>
+          <div className="p-4 flex-1 overflow-y-auto no-scrollbar">
+            <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Conexão WhatsApp</h2>
             
-            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-4">
+            <div className="bg-slate-50/50 p-3 rounded-xl border border-slate-200 mb-4 shadow-sm">
               <div className="flex items-center gap-2 mb-2">
-                <Smartphone size={16} className={waStatus === 'connected' ? 'text-green-500' : waStatus === 'error' ? 'text-red-500' : 'text-gray-400'} />
-                <span className="text-sm font-medium capitalize">{waStatus}</span>
+                <Smartphone size={16} className={waStatus === 'connected' ? 'text-emerald-500' : waStatus === 'error' ? 'text-rose-500' : 'text-slate-400'} />
+                <span className="text-sm font-medium capitalize text-slate-700">{waStatus}</span>
               </div>
               
               {waError && (
@@ -772,7 +772,7 @@ export default function App() {
               {waStatus === 'connected' && (
                 <button 
                   onClick={handleResetWa}
-                  className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-red-600 bg-red-50 py-1.5 rounded hover:bg-red-100 transition-colors"
+                  className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-rose-600 bg-rose-50 py-2 rounded-lg hover:bg-rose-100 transition-colors font-medium border border-rose-100"
                 >
                   <RefreshCw size={12} /> Desconectar
                 </button>
@@ -781,21 +781,21 @@ export default function App() {
               {(waStatus === 'error' || waStatus === 'disconnected') && (
                 <button 
                   onClick={handleRestartWa}
-                  className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-blue-600 bg-blue-50 py-1.5 rounded hover:bg-blue-100 transition-colors"
+                  className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-blue-600 bg-blue-50 py-2 rounded-lg hover:bg-blue-100 transition-colors font-medium border border-blue-100"
                 >
                   <RefreshCw size={12} /> Reiniciar Conexão
                 </button>
               )}
             </div>
 
-            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 mt-6">Armazenamento</h2>
-            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-4">
+            <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 mt-6">Armazenamento</h2>
+            <div className="bg-slate-50/50 p-3 rounded-xl border border-slate-200 mb-4 shadow-sm">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <HardDrive size={16} className="text-blue-500" />
-                  <span className="text-sm font-medium">Espaço Usado</span>
+                  <span className="text-sm font-medium text-slate-700">Espaço Usado</span>
                 </div>
-                <span className="text-sm font-bold text-gray-700">
+                <span className="text-sm font-bold text-slate-700">
                   {(storageSize / (1024 * 1024)).toFixed(2)} MB
                 </span>
               </div>
@@ -804,7 +804,7 @@ export default function App() {
                   fetchMedia();
                   setIsMediaGalleryOpen(true);
                 }}
-                className="w-full mt-2 flex items-center justify-center gap-2 text-sm text-blue-600 bg-blue-50 py-2 rounded-md hover:bg-blue-100 transition-colors font-medium border border-blue-200"
+                className="w-full mt-3 flex items-center justify-center gap-2 text-sm text-blue-600 bg-blue-50 py-2.5 rounded-lg hover:bg-blue-100 transition-colors font-medium border border-blue-200 shadow-sm"
               >
                 <ImageIcon size={16} /> Galeria de Arquivos
               </button>
@@ -813,13 +813,13 @@ export default function App() {
                   fetchAiMemories();
                   setIsAiMemoryOpen(true);
                 }}
-                className="w-full mt-2 flex items-center justify-center gap-2 text-sm text-purple-600 bg-purple-50 py-2 rounded-md hover:bg-purple-100 transition-colors font-medium border border-purple-200"
+                className="w-full mt-2 flex items-center justify-center gap-2 text-sm text-purple-600 bg-purple-50 py-2.5 rounded-lg hover:bg-purple-100 transition-colors font-medium border border-purple-200 shadow-sm"
               >
                 <Bot size={16} /> Base de Conhecimento IA
               </button>
             </div>
 
-            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 mt-6">Filtro de Tags</h2>
+            <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 mt-6">Filtro de Tags</h2>
             <div className="flex flex-wrap gap-1 mb-6">
               {tags.map(tag => {
                 const isSelected = selectedTagFilters.includes(tag.id);
@@ -963,17 +963,17 @@ export default function App() {
             </button>
           )}
         </div>
-        <div className="flex-1 overflow-x-auto p-6 flex gap-6">
+        <div className="flex-1 overflow-x-auto p-6 flex gap-6 no-scrollbar items-start">
         {columns.map(column => (
           <div 
             key={column.id} 
-            className="flex-shrink-0 w-80 bg-gray-50 rounded-xl border border-gray-200 flex flex-col max-h-full overflow-hidden shadow-sm"
+            className="flex-shrink-0 w-80 bg-slate-100/50 rounded-2xl border border-slate-200/60 flex flex-col max-h-full overflow-hidden shadow-sm"
             onDrop={(e) => handleColumnDrop(e, column.id)}
             onDragOver={handleColumnDragOver}
           >
             <div 
-              className="p-3 border-b border-gray-200 flex justify-between items-center bg-gray-100 group"
-              style={{ borderTop: `4px solid ${column.color || '#e2e8f0'}` }}
+              className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-100/80 group"
+              style={{ borderTop: `4px solid ${column.color || '#cbd5e1'}` }}
             >
               {editingColumnId === column.id ? (
                 <div className="flex-1 flex flex-col gap-2">
@@ -1001,7 +1001,7 @@ export default function App() {
                 </div>
               ) : (
                 <h3 
-                  className="font-semibold text-gray-700 flex-1 cursor-pointer hover:text-blue-600 flex items-center gap-2"
+                  className="font-semibold text-slate-700 flex-1 cursor-pointer hover:text-emerald-600 flex items-center gap-2"
                   onClick={() => {
                     setEditingColumnId(column.id);
                     setEditColumnName(column.name);
@@ -1009,25 +1009,25 @@ export default function App() {
                   }}
                   title="Clique para editar"
                 >
-                  <span className="w-3 h-3 rounded-full" style={{ backgroundColor: column.color || '#e2e8f0' }}></span>
-                  {column.name}
+                  <span className="w-3 h-3 rounded-full shadow-sm border border-slate-200" style={{ backgroundColor: column.color || '#e2e8f0' }}></span>
+                  <span className="tracking-tight">{column.name}</span>
                 </h3>
               )}
-              <span className="bg-gray-200 text-gray-600 text-xs px-2 py-1 rounded-full font-medium ml-2">
+              <span className="bg-white text-slate-500 shadow-sm border border-slate-200 text-xs px-2.5 py-0.5 rounded-full font-bold ml-2">
                 {filteredChats.filter(c => c.column_id === column.id).length}
               </span>
             </div>
             
-            <div className="p-3 flex-1 overflow-y-auto space-y-3">
+            <div className="p-3 flex-1 overflow-y-auto space-y-3 no-scrollbar custom-column-scroll">
               {filteredChats.filter(c => c.column_id === column.id).map(chat => (
                 <div 
                   key={chat.id} 
                   onClick={() => handleChatSelect(chat)}
                   draggable
                   onDragStart={(e) => handleDragStart(e, chat.id)}
-                  className={`group bg-white p-3 rounded-lg shadow-sm border cursor-pointer hover:shadow-md transition-shadow ${selectedChat?.id === chat.id ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`}
+                  className={`group bg-white p-4 rounded-xl shadow-sm border cursor-pointer hover:shadow-md hover:border-slate-300 transition-all ${selectedChat?.id === chat.id ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-slate-200'} flex flex-col relative`}
                 >
-                  <div className="flex justify-between items-start mb-1">
+                  <div className="flex justify-between items-start mb-2">
                     <div className="flex items-center gap-2 overflow-hidden">
                       {chat.profile_pic ? (
                         <img 
@@ -1045,7 +1045,7 @@ export default function App() {
                           }}
                         />
                       ) : null}
-                      <div className={`w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 flex-shrink-0 ${chat.profile_pic ? 'hidden' : ''}`}>
+                      <div className={`w-8 h-8 rounded-full border border-slate-100 bg-slate-100 flex items-center justify-center text-slate-500 font-semibold flex-shrink-0 ${chat.profile_pic ? 'hidden' : ''}`}>
                         {chat.name ? chat.name.charAt(0).toUpperCase() : '?'}
                       </div>
                       {editingChatNameId === chat.id ? (
@@ -1056,15 +1056,15 @@ export default function App() {
                           onBlur={() => handleEditChatName(chat.id)}
                           onKeyDown={(e) => e.key === 'Enter' && handleEditChatName(chat.id)}
                           onClick={(e) => e.stopPropagation()}
-                          className="font-medium text-gray-900 border-b border-blue-500 focus:outline-none w-full"
+                          className="font-medium text-slate-800 border-b border-emerald-500 focus:outline-none w-full bg-slate-50 px-1 rounded-t"
                           autoFocus
                         />
                       ) : (
-                        <h4 className="font-medium text-gray-900 truncate pr-2 flex items-center gap-1 group/name">
+                        <h4 className="font-semibold text-slate-800 tracking-tight truncate pr-2 flex items-center gap-1 group/name">
                           {chat.name || chat.phone}
                           <button 
                             onClick={(e) => { e.stopPropagation(); setEditingChatNameId(chat.id); setEditChatName(chat.name || chat.phone); }}
-                            className="opacity-0 group-hover/name:opacity-100 text-gray-400 hover:text-blue-500 transition-opacity"
+                            className="opacity-0 group-hover/name:opacity-100 text-slate-400 hover:text-emerald-500 transition-opacity"
                           >
                             <Edit2 size={12} />
                           </button>
@@ -1072,30 +1072,30 @@ export default function App() {
                       )}
                     </div>
                     {chat.unread_count > 0 && (
-                      <span className="bg-green-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0">
+                      <span className="bg-emerald-500 text-white shadow-sm text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0">
                         {chat.unread_count}
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-gray-500 truncate mb-2 flex items-center gap-1">
+                  <p className="text-[11px] text-slate-500 truncate mb-3 flex items-center gap-1.5 opacity-90 leading-relaxed">
                     {chat.last_message_from_me === 1 && (
-                      <CheckCheck size={14} className="text-blue-500 flex-shrink-0" />
+                      <CheckCheck size={14} className="text-sky-500 flex-shrink-0" />
                     )}
                     <span className="truncate">{chat.last_message}</span>
                   </p>
                   
-                  <div className="flex justify-between items-center mt-2">
-                    <div className="flex flex-wrap gap-1">
+                  <div className="flex justify-between items-center mt-auto">
+                    <div className="flex flex-wrap gap-1.5">
                       {chat.tag_ids.map(tagId => {
                         const tag = tags.find(t => t.id === tagId);
                         if (!tag) return null;
                         return (
-                          <div key={tagId} className="flex items-center gap-1 bg-gray-100 px-1.5 py-0.5 rounded text-[10px] text-gray-600 group/tag">
-                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: tag.color }} />
+                          <div key={tagId} className="flex items-center gap-1 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-md text-[10px] font-medium text-slate-600 group/tag shadow-sm">
+                            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: tag.color }} />
                             <span>{tag.name}</span>
                             <button 
                               onClick={(e) => { e.stopPropagation(); handleRemoveTag(chat.id, tagId); }}
-                              className="opacity-0 group-hover/tag:opacity-100 text-gray-400 hover:text-red-500 ml-0.5"
+                              className="opacity-0 group-hover/tag:opacity-100 text-slate-400 hover:text-rose-500 ml-0.5 transition-colors"
                             >
                               <X size={10} />
                             </button>
@@ -1104,16 +1104,25 @@ export default function App() {
                       })}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                      <span className="text-[10px] text-gray-400">
+                      <span className="text-[10px] font-medium text-slate-400 group-hover:opacity-0 transition-opacity">
                         {chat.last_message_time ? format(new Date(chat.last_message_time), 'HH:mm') : ''}
                       </span>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.id); }}
-                        className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity"
-                        title="Excluir conversa"
-                      >
-                        <Trash2 size={12} />
-                      </button>
+                      <div className="absolute right-3 bottom-3 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-white pl-2">
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setChatToTag(chat.id); }}
+                          className="text-slate-400 hover:text-emerald-500 p-1 bg-slate-50 rounded-full hover:bg-emerald-50 transition-colors"
+                          title="Adicionar Tag"
+                        >
+                          <Plus size={12} />
+                        </button>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.id); }}
+                          className="text-slate-400 hover:text-rose-500 p-1 bg-slate-50 rounded-full hover:bg-rose-50 transition-colors"
+                          title="Excluir conversa"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1125,18 +1134,18 @@ export default function App() {
         {/* Add Column Button */}
         <div className="flex-shrink-0 w-80">
           {isAddingColumn ? (
-            <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm focus-within:border-emerald-300 focus-within:ring-1 focus-within:ring-emerald-300 transition-all">
               <input
                 type="text"
                 value={newColumnName}
                 onChange={(e) => setNewColumnName(e.target.value)}
                 placeholder="Nome da coluna"
-                className="w-full border border-gray-300 rounded px-3 py-2 text-sm mb-2 focus:outline-none focus:border-blue-500"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-emerald-500 bg-slate-50"
                 autoFocus
                 onKeyDown={(e) => e.key === 'Enter' && handleAddColumn()}
               />
-              <div className="flex items-center gap-2 mb-2">
-                <label className="text-xs text-gray-500">Cor:</label>
+              <div className="flex items-center gap-2 mb-3 px-1">
+                <label className="text-xs font-semibold text-slate-500 tracking-wide uppercase">Cor</label>
                 <input 
                   type="color" 
                   value={newColumnColor} 
@@ -1145,16 +1154,16 @@ export default function App() {
                 />
               </div>
               <div className="flex gap-2">
-                <button onClick={handleAddColumn} className="bg-blue-600 text-white text-xs px-3 py-1.5 rounded hover:bg-blue-700">Salvar</button>
-                <button onClick={() => setIsAddingColumn(false)} className="bg-gray-100 text-gray-600 text-xs px-3 py-1.5 rounded hover:bg-gray-200">Cancelar</button>
+                <button onClick={handleAddColumn} className="bg-emerald-600 text-white text-xs px-4 py-2 rounded-lg font-medium hover:bg-emerald-700 transition-colors flex-1">Salvar</button>
+                <button onClick={() => setIsAddingColumn(false)} className="bg-slate-100 text-slate-600 text-xs px-4 py-2 rounded-lg font-medium hover:bg-slate-200 transition-colors flex-1">Cancelar</button>
               </div>
             </div>
           ) : (
             <button 
               onClick={() => setIsAddingColumn(true)}
-              className="w-full flex items-center justify-center gap-2 bg-gray-50 border-2 border-dashed border-gray-300 text-gray-500 rounded-xl py-4 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+              className="w-full flex items-center justify-center gap-2 bg-slate-100/50 border-2 border-dashed border-slate-300 text-slate-500 rounded-2xl py-5 font-medium hover:bg-slate-100 hover:text-emerald-600 hover:border-emerald-300 transition-colors"
             >
-              <Plus size={20} /> Adicionar Coluna
+              <Plus size={20} /> Nova Coluna
             </button>
           )}
         </div>
@@ -1163,15 +1172,15 @@ export default function App() {
 
     {/* Chat Panel */}
       {selectedChat && isRightSidebarOpen && (
-        <div className="w-96 bg-white border-l border-gray-200 flex flex-col shadow-xl z-10">
-          <div className="p-4 border-b border-gray-200 flex flex-col bg-gray-50">
-            <div className="flex justify-between items-start mb-2">
+        <div className="w-96 bg-white border-l border-slate-200 flex flex-col shadow-[0_-4px_24px_rgba(0,0,0,0.05)] z-20 relative">
+          <div className="p-4 border-b border-slate-100 flex flex-col bg-white">
+            <div className="flex justify-between items-start mb-3">
               <div className="flex items-center gap-3">
                 {selectedChat.profile_pic ? (
                   <img 
                     src={selectedChat.profile_pic} 
                     alt="" 
-                    className="w-10 h-10 rounded-full object-cover flex-shrink-0" 
+                    className="w-11 h-11 rounded-full object-cover flex-shrink-0 shadow-sm border border-slate-100" 
                     onError={(e) => {
                       e.currentTarget.style.display = 'none';
                       e.currentTarget.nextElementSibling?.classList.remove('hidden');
@@ -1182,12 +1191,14 @@ export default function App() {
                     }}
                   />
                 ) : null}
-                <div className={`w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 flex-shrink-0 ${selectedChat.profile_pic ? 'hidden' : ''}`}>
+                <div className={`w-11 h-11 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-500 font-bold text-lg flex-shrink-0 ${selectedChat.profile_pic ? 'hidden' : ''}`}>
                   {selectedChat.name ? selectedChat.name.charAt(0).toUpperCase() : '?'}
                 </div>
                 <div>
-                  <h3 className="font-bold text-gray-800">{selectedChat.name || selectedChat.phone}</h3>
-                  <p className="text-xs text-gray-500">{selectedChat.phone}</p>
+                  <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+                    {selectedChat.name || selectedChat.phone}
+                  </h3>
+                  <p className="text-sm text-slate-500">{selectedChat.phone}</p>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -1250,7 +1261,7 @@ export default function App() {
             </div>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#e5ddd5]" onDrop={handleDrop} onDragOver={handleDragOver}>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50" onDrop={handleDrop} onDragOver={handleDragOver}>
             {messages.map((msg, index) => {
               const currentMsgDate = new Date(msg.timestamp);
               const prevMsgDate = index > 0 ? new Date(messages[index - 1].timestamp) : null;
@@ -1270,14 +1281,14 @@ export default function App() {
               return (
                 <React.Fragment key={msg.id}>
                   {showDateSeparator && (
-                    <div className="flex justify-center my-4">
-                      <span className="bg-[#e1f3fb] text-gray-600 text-xs px-3 py-1 rounded-lg shadow-sm">
+                    <div className="flex justify-center my-6">
+                      <span className="bg-white border border-slate-200 text-slate-500 font-medium text-[10px] uppercase tracking-widest px-3 py-1 rounded-full shadow-sm">
                         {dateLabel}
                       </span>
                     </div>
                   )}
                   <div className={`flex ${msg.from_me ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[80%] rounded-lg p-2 text-sm shadow-sm ${msg.from_me ? 'bg-[#dcf8c6] text-gray-800' : 'bg-white text-gray-800'}`}>
+                    <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed shadow-sm flex flex-col relative group/msg ${msg.from_me ? 'bg-emerald-600 text-white rounded-br-sm' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm'}`}>
                       {msg.media_url && (
                         <div className="mb-2">
                           {msg.media_type?.startsWith('image/') ? (
@@ -1298,17 +1309,17 @@ export default function App() {
                               )}
                             </div>
                           ) : msg.media_type?.startsWith('video/') ? (
-                            <video controls src={msg.media_url} className="max-w-full rounded-md max-h-64" />
+                            <video controls src={msg.media_url} className="max-w-full rounded-lg max-h-64 shadow-sm" />
                           ) : (
-                            <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 bg-black/5 p-2 rounded hover:bg-black/10 transition-colors">
-                              <span className="text-2xl">📄</span>
-                              <span className="truncate max-w-[200px]">{msg.media_name || 'Documento'}</span>
+                            <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-3 p-3 rounded-xl transition-colors border ${msg.from_me ? 'bg-emerald-700/50 border-emerald-500/50 hover:bg-emerald-700' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}>
+                              <span className="text-2xl opacity-90">📄</span>
+                              <span className="truncate max-w-[200px] font-medium">{msg.media_name || 'Documento'}</span>
                             </a>
                           )}
                         </div>
                       )}
                       {msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>}
-                      <span className="text-[10px] text-gray-500 block text-right mt-1">
+                      <span className={`text-[9px] font-medium block text-right mt-1.5 ${msg.from_me ? 'text-emerald-100' : 'text-slate-400'}`}>
                         {format(new Date(msg.timestamp), 'HH:mm')}
                       </span>
                     </div>
@@ -1318,7 +1329,8 @@ export default function App() {
             })}
             {uploadingMedia && (
               <div className="flex justify-end">
-                <div className="bg-[#dcf8c6] text-gray-800 max-w-[80%] rounded-lg p-2 text-sm shadow-sm italic opacity-70">
+                <div className="bg-emerald-50 text-emerald-700 border border-emerald-100 max-w-[80%] rounded-2xl rounded-br-sm px-4 py-2.5 text-[13px] shadow-sm italic opacity-70 flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-emerald-500"></div>
                   Enviando arquivo...
                 </div>
               </div>
@@ -1326,15 +1338,15 @@ export default function App() {
             <div ref={messagesEndRef} />
           </div>
           
-          <div className="p-3 border-t border-gray-200 bg-gray-50 relative">
+          <div className="p-3 border-t border-slate-200 bg-white relative">
             {uploadingMedia && (
-              <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-green-500"></div>
+              <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10 backdrop-blur-[1px]">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-emerald-500"></div>
               </div>
             )}
             <form onSubmit={handleSendMessage} className="flex gap-2 items-center">
-              <label className="cursor-pointer text-gray-500 hover:text-gray-700 p-2 rounded-full hover:bg-gray-200 transition-colors">
-                <Plus size={20} />
+              <label className="cursor-pointer text-slate-400 hover:text-emerald-600 p-2 rounded-full hover:bg-emerald-50 transition-colors">
+                <Plus size={22} strokeWidth={2.5} />
                 <input 
                   type="file" 
                   className="hidden" 
@@ -1347,15 +1359,15 @@ export default function App() {
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 placeholder="Digite uma mensagem ou arraste um arquivo..."
-                className="flex-1 border border-gray-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                className="flex-1 border border-slate-200 bg-slate-50 rounded-full px-5 py-2.5 text-[13px] focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-shadow"
                 disabled={uploadingMedia || waStatus !== 'connected'}
               />
               <button 
                 type="submit"
                 disabled={(!newMessage.trim() && !uploadingMedia) || waStatus !== 'connected'}
-                className="bg-green-500 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-emerald-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm ml-1"
               >
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"></path></svg>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" className="ml-1"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"></path></svg>
               </button>
             </form>
           </div>
