@@ -709,14 +709,14 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         let mediaName = null;
 
         if (file) {
-          const media = MessageMedia.fromFilePath(file.path);
-          media.filename = file.originalname;
-          sentMsg = await waClient.sendMessage(chatId, media, { caption: body });
-          
-          // Move file to have original extension
+          // Move file to have original extension first so MessageMedia can infer mimetype
           const ext = path.extname(file.originalname);
           const newPath = file.path + ext;
           fs.renameSync(file.path, newPath);
+          
+          const media = MessageMedia.fromFilePath(newPath);
+          media.filename = file.originalname;
+          sentMsg = await waClient.sendMessage(chatId, media, { caption: body });
           
           mediaUrl = `/media/${file.filename}${ext}`;
           mediaType = file.mimetype;
