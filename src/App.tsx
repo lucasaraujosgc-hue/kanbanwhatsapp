@@ -1261,7 +1261,7 @@ export default function App() {
             </div>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50" onDrop={handleDrop} onDragOver={handleDragOver}>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#e5ddd5]" onDrop={handleDrop} onDragOver={handleDragOver} style={{ backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')", backgroundRepeat: 'repeat', backgroundSize: '400px' }}>
             {messages.map((msg, index) => {
               const currentMsgDate = new Date(msg.timestamp);
               const prevMsgDate = index > 0 ? new Date(messages[index - 1].timestamp) : null;
@@ -1282,13 +1282,13 @@ export default function App() {
                 <React.Fragment key={msg.id}>
                   {showDateSeparator && (
                     <div className="flex justify-center my-6">
-                      <span className="bg-white border border-slate-200 text-slate-500 font-medium text-[10px] uppercase tracking-widest px-3 py-1 rounded-full shadow-sm">
+                      <span className="bg-[#e1f3fb] border border-[#d6eaf5] text-slate-600 font-medium text-[11px] uppercase tracking-wide px-3 py-1 rounded-lg shadow-sm">
                         {dateLabel}
                       </span>
                     </div>
                   )}
                   <div className={`flex ${msg.from_me ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed shadow-sm flex flex-col relative group/msg ${msg.from_me ? 'bg-emerald-600 text-white rounded-br-sm' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm'}`}>
+                    <div className={`max-w-[85%] rounded-lg px-3 py-2 text-[14px] leading-relaxed shadow-sm flex flex-col relative group/msg ${msg.from_me ? 'bg-[#dcf8c6] text-gray-800' : 'bg-white text-gray-800'}`}>
                       {msg.media_url && (
                         <div className="mb-2">
                           {msg.media_type?.startsWith('image/') ? (
@@ -1309,9 +1309,9 @@ export default function App() {
                               )}
                             </div>
                           ) : msg.media_type?.startsWith('video/') ? (
-                            <video controls src={msg.media_url} className="max-w-full rounded-lg max-h-64 shadow-sm" />
+                            <video controls src={msg.media_url} className="max-w-full rounded-md max-h-64 shadow-sm" />
                           ) : (
-                            <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-3 p-3 rounded-xl transition-colors border ${msg.from_me ? 'bg-emerald-700/50 border-emerald-500/50 hover:bg-emerald-700' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}>
+                            <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-3 p-3 rounded-lg transition-colors border ${msg.from_me ? 'bg-[#cbeba8] border-[#aadc7f] hover:bg-[#b0df82]' : 'bg-gray-50 border-gray-200 hover:bg-gray-100'}`}>
                               <span className="text-2xl opacity-90">📄</span>
                               <span className="truncate max-w-[200px] font-medium">{msg.media_name || 'Documento'}</span>
                             </a>
@@ -1319,7 +1319,7 @@ export default function App() {
                         </div>
                       )}
                       {msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>}
-                      <span className={`text-[9px] font-medium block text-right mt-1.5 ${msg.from_me ? 'text-emerald-100' : 'text-slate-400'}`}>
+                      <span className={`text-[10px] font-medium block text-right mt-1 ${msg.from_me ? 'text-gray-500' : 'text-gray-500'}`}>
                         {format(new Date(msg.timestamp), 'HH:mm')}
                       </span>
                     </div>
@@ -1329,7 +1329,7 @@ export default function App() {
             })}
             {uploadingMedia && (
               <div className="flex justify-end">
-                <div className="bg-emerald-50 text-emerald-700 border border-emerald-100 max-w-[80%] rounded-2xl rounded-br-sm px-4 py-2.5 text-[13px] shadow-sm italic opacity-70 flex items-center gap-2">
+                <div className="bg-[#dcf8c6] text-gray-800 border border-[#b2e98d] max-w-[80%] rounded-lg px-4 py-2 text-[14px] shadow-sm italic opacity-70 flex items-center gap-2">
                   <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-emerald-500"></div>
                   Enviando arquivo...
                 </div>
