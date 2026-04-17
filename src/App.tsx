@@ -187,14 +187,36 @@ export default function App() {
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollContainerRef = useRef<HTMLDivElement>(null);
+  const prevChatIdRef = useRef<string | undefined>(undefined);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, selectedChat]);
+    if (selectedChat?.id !== prevChatIdRef.current) {
+      scrollToBottom('auto');
+      prevChatIdRef.current = selectedChat?.id;
+      return;
+    }
+
+    const scrollContainer = chatScrollContainerRef.current;
+    if (!scrollContainer) {
+      scrollToBottom();
+      return;
+    }
+
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
+
+    const lastMsg = messages[messages.length - 1];
+    const isFromMe = lastMsg?.from_me;
+
+    if (isNearBottom || isFromMe) {
+      scrollToBottom('smooth');
+    }
+  }, [messages, selectedChat?.id]);
 
   useEffect(() => {
     const savedPassword = localStorage.getItem('app_password') || sessionStorage.getItem('app_password');
@@ -1268,7 +1290,7 @@ export default function App() {
             </div>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#e5ddd5]" onDrop={handleDrop} onDragOver={handleDragOver} style={{ backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')", backgroundRepeat: 'repeat', backgroundSize: '400px' }}>
+          <div ref={chatScrollContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#e5ddd5]" onDrop={handleDrop} onDragOver={handleDragOver} style={{ backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')", backgroundRepeat: 'repeat', backgroundSize: '400px' }}>
             {messages.map((msg, index) => {
               const currentMsgDate = new Date(msg.timestamp);
               const prevMsgDate = index > 0 ? new Date(messages[index - 1].timestamp) : null;
