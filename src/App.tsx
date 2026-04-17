@@ -335,8 +335,15 @@ export default function App() {
       ]);
       
       setColumns(await colsRes.json());
-      setChats(await chatsRes.json());
+      const newChats = await chatsRes.json();
+      setChats(newChats);
       setTags(await tagsRes.json());
+      
+      setSelectedChat(prev => {
+        if (!prev) return null;
+        const updated = newChats.find((c: Chat) => c.id === prev.id);
+        return updated ? { ...prev, ...updated } : prev;
+      });
       
       const waData = await waRes.json();
       setWaStatus(waData.status);

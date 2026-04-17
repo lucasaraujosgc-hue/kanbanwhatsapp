@@ -853,31 +853,19 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
   const downloadProfilePic = async (url: string, chatId: string): Promise<string | null> => {
     try {
-      if (!waClient || !waClient.pupPage) return null;
-
-      // Usa o browser do Puppeteer (que tem a sessão do WhatsApp) para baixar a imagem
-      const base64Data = await waClient.pupPage.evaluate(async (imgUrl: string) => {
-        try {
-          const res = await fetch(imgUrl, { credentials: 'include' });
-          if (!res.ok) return null;
-          const buffer = await res.arrayBuffer();
-          const bytes = new Uint8Array(buffer);
-          let binary = '';
-          for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
-          }
-          return btoa(binary);
-        } catch (e) {
-          return null;
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Referer': 'https://web.whatsapp.com/'
         }
-      }, url);
-
-      if (!base64Data) return null;
+      });
 
       const safeId = chatId.replace(/[@.]/g, '_');
       const filename = `profile_${safeId}.jpg`;
       const filepath = path.join(MEDIA_DIR, filename);
-      fs.writeFileSync(filepath, Buffer.from(base64Data, 'base64'));
+
+      fs.writeFileSync(filepath, response.data);
 
       return `/media/${filename}`;
     } catch (err) {
