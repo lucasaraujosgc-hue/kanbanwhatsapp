@@ -216,6 +216,7 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatScrollContainerRef = useRef<HTMLDivElement>(null);
   const prevChatIdRef = useRef<string | undefined>(undefined);
+  const firstLoadRef = useRef<boolean>(true);
 
   const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
     messagesEndRef.current?.scrollIntoView({ behavior });
@@ -223,8 +224,14 @@ export default function App() {
 
   useEffect(() => {
     if (selectedChat?.id !== prevChatIdRef.current) {
-      scrollToBottom('auto');
       prevChatIdRef.current = selectedChat?.id;
+      firstLoadRef.current = true;
+      return;
+    }
+
+    if (firstLoadRef.current && messages.length > 0 && messages[0].chat_id === selectedChat?.id) {
+      firstLoadRef.current = false;
+      scrollToBottom('auto');
       return;
     }
 
@@ -240,7 +247,7 @@ export default function App() {
     const lastMsg = messages[messages.length - 1];
     const isFromMe = lastMsg?.from_me;
 
-    if (isNearBottom || isFromMe) {
+    if (!firstLoadRef.current && (isNearBottom || isFromMe)) {
       scrollToBottom('smooth');
     }
   }, [messages, selectedChat?.id]);
@@ -1019,7 +1026,7 @@ export default function App() {
             </button>
           )}
         </div>
-        <div className="flex-1 overflow-x-auto p-6 flex gap-6 items-start h-full pb-8">
+        <div className="flex-1 overflow-x-auto overflow-y-hidden px-6 pt-6 pb-2 mb-4 flex gap-6 items-start">
         {columns.map(column => (
           <div 
             key={column.id} 
