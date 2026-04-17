@@ -1060,10 +1060,15 @@ export default function App() {
                     <div className="flex items-center gap-2 overflow-hidden">
                       {chat.profile_pic ? (
                         <img 
+                          key={chat.profile_pic}
                           src={chat.profile_pic} 
                           alt="" 
                           className="w-8 h-8 rounded-full object-cover flex-shrink-0" 
                           referrerPolicy="no-referrer"
+                          onLoad={(e) => {
+                            e.currentTarget.style.display = 'block';
+                            e.currentTarget.nextElementSibling?.classList.add('hidden');
+                          }}
                           onError={(e) => {
                             e.currentTarget.style.display = 'none';
                             e.currentTarget.nextElementSibling?.classList.remove('hidden');
@@ -1207,9 +1212,14 @@ export default function App() {
               <div className="flex items-center gap-3">
                 {selectedChat.profile_pic ? (
                   <img 
+                    key={selectedChat.profile_pic}
                     src={selectedChat.profile_pic} 
                     alt="" 
                     className="w-11 h-11 rounded-full object-cover flex-shrink-0 shadow-sm border border-slate-100" 
+                    onLoad={(e) => {
+                      e.currentTarget.style.display = 'block';
+                      e.currentTarget.nextElementSibling?.classList.add('hidden');
+                    }}
                     onError={(e) => {
                       e.currentTarget.style.display = 'none';
                       e.currentTarget.nextElementSibling?.classList.remove('hidden');

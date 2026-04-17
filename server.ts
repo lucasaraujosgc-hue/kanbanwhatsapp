@@ -865,9 +865,10 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       const filename = `profile_${safeId}.jpg`;
       const filepath = path.join(MEDIA_DIR, filename);
 
-      fs.writeFileSync(filepath, response.data);
+      fs.writeFileSync(filepath, Buffer.from(response.data));
 
-      return `/media/${filename}`;
+      // Append timestamp to break browser cache, so if the frontend retries a previously broken image, it receives a new URL to force reload.
+      return `/media/${filename}?t=${Date.now()}`;
     } catch (err) {
       console.error(`Erro ao baixar foto de perfil (${chatId}):`, err);
       return null;
