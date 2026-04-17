@@ -140,6 +140,33 @@ export default function App() {
   const [isCopilotLoading, setIsCopilotLoading] = useState(false);
   const copilotMessagesEndRef = useRef<HTMLDivElement>(null);
 
+  const [chatPanelWidth, setChatPanelWidth] = useState<number>(384);
+  const isResizingRef = useRef(false);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      const newWidth = document.body.clientWidth - e.clientX;
+      if (newWidth > 300 && newWidth < 800) {
+        setChatPanelWidth(newWidth);
+      }
+    };
+    
+    const handleMouseUp = () => {
+      if (isResizingRef.current) {
+        isResizingRef.current = false;
+        document.body.style.cursor = '';
+      }
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
+
   const [isAiMemoryOpen, setIsAiMemoryOpen] = useState(false);
   const [aiMemories, setAiMemories] = useState<any[]>([]);
   const [newMemoryContent, setNewMemoryContent] = useState('');
@@ -992,7 +1019,7 @@ export default function App() {
             </button>
           )}
         </div>
-        <div className="flex-1 overflow-x-auto p-6 flex gap-6 no-scrollbar items-start">
+        <div className="flex-1 overflow-x-auto p-6 flex gap-6 items-start h-full pb-8">
         {columns.map(column => (
           <div 
             key={column.id} 
@@ -1206,7 +1233,19 @@ export default function App() {
 
     {/* Chat Panel */}
       {selectedChat && isRightSidebarOpen && (
-        <div className="w-96 bg-white border-l border-slate-200 flex flex-col shadow-[0_-4px_24px_rgba(0,0,0,0.05)] z-20 relative">
+        <div 
+          className="bg-white border-l border-slate-200 flex flex-col shadow-[0_-4px_24px_rgba(0,0,0,0.05)] z-20 relative flex-shrink-0"
+          style={{ width: `${chatPanelWidth}px` }}
+        >
+          {/* Resize Handle */}
+          <div 
+            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-emerald-400 opacity-50 z-30 transition-colors"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              isResizingRef.current = true;
+              document.body.style.cursor = 'col-resize';
+            }}
+          />
           <div className="p-4 border-b border-slate-100 flex flex-col bg-white">
             <div className="flex justify-between items-start mb-3">
               <div className="flex items-center gap-3">
