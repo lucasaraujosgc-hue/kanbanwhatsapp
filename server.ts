@@ -564,6 +564,33 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
     });
   });
 
+  app.get('/api/test-contact/:id', async (req, res) => {
+    if (!waClient) return res.status(400).send('waClient not ready');
+    try {
+      const contactId = req.params.id; // provide full id like 5511999999999@c.us
+      const contact = await waClient.getContactById(contactId);
+      
+      const evalData = await waClient.pupPage.evaluate(async (id: string) => {
+          const w = window as any;
+          const c = w.Store.Contact.get(id);
+          return c ? Object.keys(c).reduce((acc, k) => {
+              if (typeof c[k] === 'string' || typeof c[k] === 'number' || typeof c[k] === 'boolean' || c[k] === null) {
+                  acc[k] = c[k];
+              } else if (c[k] && typeof c[k] === 'object' && c[k].user) { // check for wid
+                  acc[k] = c[k]._serialized || c[k];
+              }
+              return acc;
+          }, {} as any) : null;
+      }, contactId);
+
+      res.json({
+         nativeContact: contact,
+         evalData: evalData
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
   app.get('/api/tags', (req, res) => {
     db.all("SELECT * FROM tags", (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
@@ -891,9 +918,59 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         // Ignore error for @lid contacts or other special contacts
       }
       
-      let profilePicUrl = await getProfilePicUrl(waClient, chatId);
+      let profilePicUrl = null;
+      let contactObj = null;
+
+      try {
+        contactObj = await waClient.getContactById(chatId);
+      } catch (e) {}
+
+      // Try using the getProfilePicUrl from our getProfilePicUrl helper
+      profilePicUrl = await getProfilePicUrl(waClient, chatId);
+      
+      // If none of those worked, and we have a contact object
+      if (!profilePicUrl && contactObj) {
+         try {
+            profilePicUrl = await contactObj.getProfilePicUrl();
+         } catch (e) {}
+
+         // Try reading LID from the contact if accessible directly
+         if (!profilePicUrl && (contactObj as any).id?.fromMe === false && (contactObj as any).id?.server === 'lid') {
+            profilePicUrl = await getProfilePicUrl(waClient, (contactObj as any).id._serialized);
+         }
+      }
+
+      // Final fallback to WWebJS native method
       if (!profilePicUrl) {
         profilePicUrl = await waClient.getProfilePicUrl(chatId).catch(() => null);
+      }
+
+      // If we STILL don't have it, let's try puppeteer evaluate to see if there is a .lid on the contact
+      if (!profilePicUrl) {
+         profilePicUrl = await waClient.pupPage.evaluate(async (id: string) => {
+            try {
+               const w = window as any;
+               const c = w.Store.Contact.get(id);
+               
+               // lid or lidJid
+               const lidStr = c && (c.lidJid || c.lid);
+               if (lidStr) {
+                  const lidWid = typeof lidStr === 'string' ? w.Store.WidFactory.createWid(lidStr) : lidStr;
+                  
+                  if (w.Store.ProfilePic && w.Store.ProfilePic.profilePicFind) {
+                      const res = await w.Store.ProfilePic.profilePicFind(lidWid);
+                      if (res && res.eurl) return res.eurl;
+                  }
+                  if (w.Store.ProfilePic && w.Store.ProfilePic.requestProfilePicFromServer) {
+                      const res = await w.Store.ProfilePic.requestProfilePicFromServer(lidWid);
+                      if (res && res.eurl) return res.eurl;
+                  }
+               }
+               return null;
+            } catch(e) {
+               return null;
+            }
+         }, chatId);
       }
 
       let profilePic = null;
