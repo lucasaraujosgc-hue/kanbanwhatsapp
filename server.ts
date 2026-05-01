@@ -942,35 +942,44 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
       // Final fallback to WWebJS native method
       if (!profilePicUrl) {
-        profilePicUrl = await waClient.getProfilePicUrl(chatId).catch(() => null);
+         profilePicUrl = await waClient.getProfilePicUrl(chatId).catch(() => null);
       }
 
-      // If we STILL don't have it, let's try puppeteer evaluate to see if there is a .lid on the contact
-      if (!profilePicUrl) {
-         profilePicUrl = await waClient.pupPage.evaluate(async (id: string) => {
-            try {
-               const w = window as any;
-               const c = w.Store.Contact.get(id);
-               
-               // lid or lidJid
-               const lidStr = c && (c.lidJid || c.lid);
-               if (lidStr) {
-                  const lidWid = typeof lidStr === 'string' ? w.Store.WidFactory.createWid(lidStr) : lidStr;
-                  
-                  if (w.Store.ProfilePic && w.Store.ProfilePic.profilePicFind) {
-                      const res = await w.Store.ProfilePic.profilePicFind(lidWid);
-                      if (res && res.eurl) return res.eurl;
-                  }
-                  if (w.Store.ProfilePic && w.Store.ProfilePic.requestProfilePicFromServer) {
-                      const res = await w.Store.ProfilePic.requestProfilePicFromServer(lidWid);
-                      if (res && res.eurl) return res.eurl;
-                  }
-               }
-               return null;
-            } catch(e) {
-               return null;
-            }
-         }, chatId);
+      // Also try to salvage a real name and LID picture from puppeteer context
+      let realNameFromEval: string | null = null;
+      
+      const evalData = await waClient.pupPage.evaluate(async (id: string) => {
+          try {
+             const w = window as any;
+             const c = w.Store.Contact.get(id);
+             let foundUrl = null;
+             let foundName = c ? (c.name || c.pushname || null) : null;
+             
+             // lid or lidJid
+             const lidStr = c && (c.lidJid || c.lid);
+             if (lidStr) {
+                const lidWid = typeof lidStr === 'string' ? w.Store.WidFactory.createWid(lidStr) : lidStr;
+                
+                if (w.Store.ProfilePic && w.Store.ProfilePic.profilePicFind) {
+                    const res = await w.Store.ProfilePic.profilePicFind(lidWid);
+                    if (res && res.eurl) foundUrl = res.eurl;
+                }
+                if (!foundUrl && w.Store.ProfilePic && w.Store.ProfilePic.requestProfilePicFromServer) {
+                    const res = await w.Store.ProfilePic.requestProfilePicFromServer(lidWid);
+                    if (res && res.eurl) foundUrl = res.eurl;
+                }
+             }
+             return { url: foundUrl, name: foundName };
+          } catch(e) {
+             return { url: null, name: null };
+          }
+      }, chatId);
+
+      if (!profilePicUrl && evalData && evalData.url) {
+         profilePicUrl = evalData.url;
+      }
+      if (evalData && evalData.name) {
+         realNameFromEval = evalData.name;
       }
 
       let profilePic = null;
@@ -979,8 +988,8 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       }
 
       db.run(
-        "UPDATE chats SET profile_pic = ?, name = ? WHERE id = ?",
-        [profilePic || null, name, chatId],
+        "UPDATE chats SET profile_pic = ? WHERE id = ?",
+        [profilePic || null, chatId],
         (err) => {
           if (err) {
             console.error(`Error updating chat info for ${chatId}:`, err);
@@ -989,11 +998,22 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
           io.emit('chat_updated', {
             id: chatId,
-            name: name,
             profile_pic: profilePic || null
           });
         }
       );
+
+      // Attempt to repair names that got corrupted into IDs/numbers by previous bugs
+      db.get("SELECT name, phone FROM chats WHERE id = ?", [chatId], (err, row: any) => {
+         if (!err && row && (row.name === chatId || row.name === row.phone || !row.name)) {
+            const betterName = realNameFromEval || name;
+            if (betterName && betterName !== chatId && betterName !== row.phone && betterName !== '') {
+               db.run("UPDATE chats SET name = ? WHERE id = ?", [betterName, chatId], () => {
+                  io.emit('chat_updated', { id: chatId, name: betterName });
+               });
+            }
+         }
+      });
 
       return profilePic || null;
     } catch (error) {
@@ -1254,9 +1274,14 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
                 });
               }
               
+              let finalName = chatRow.name;
+              if ((chatRow.name === chatId || chatRow.name === phone || chatRow.name === '') && name !== chatId && name !== phone && name !== '') {
+                finalName = name;
+              }
+
               db.run(`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?, name = ?, last_message_from_me = ?${unreadUpdate} WHERE id = ?`,
-                [displayBody, timestamp, finalProfilePic, name, fromMe, chatId], () => {
-                  io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name, last_message_from_me: fromMe });
+                [displayBody, timestamp, finalProfilePic, finalName, fromMe, chatId], () => {
+                  io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name: finalName, last_message_from_me: fromMe });
                 });
             });
           }
