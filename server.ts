@@ -591,6 +591,45 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       res.status(500).json({ error: e.message });
     }
   });
+  app.post('/api/repair-names', async (req, res) => {
+    if (!waClient || waStatus !== 'connected') return res.status(400).json({ error: 'WhatsApp not connected' });
+
+    db.all("SELECT id, name, phone FROM chats", async (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+
+      let repaired = 0;
+      for (const row of rows) {
+        if (!row.name || row.name === row.id || row.name === row.phone) {
+           const evalData = await waClient.pupPage.evaluate(async (id: string) => {
+              try {
+                 const w = window as any;
+                 const c = w.Store.Contact.get(id);
+                 return c ? (c.name || c.pushname) : null;
+              } catch(e) { return null; }
+           }, row.id);
+
+           if (evalData && evalData !== row.id && evalData !== row.phone) {
+             db.run("UPDATE chats SET name = ? WHERE id = ?", [evalData, row.id]);
+             io.emit('chat_updated', { id: row.id, name: evalData });
+             repaired++;
+           } else {
+             // Let's try native getContact
+             try {
+                const contact = await waClient.getContactById(row.id);
+                const nativeName = contact.name || contact.pushname;
+                if (nativeName && nativeName !== row.id && nativeName !== row.phone) {
+                   db.run("UPDATE chats SET name = ? WHERE id = ?", [nativeName, row.id]);
+                   io.emit('chat_updated', { id: row.id, name: nativeName });
+                   repaired++;
+                }
+             } catch (e) {}
+           }
+        }
+      }
+      res.json({ success: true, repaired });
+    });
+  });
+
   app.get('/api/tags', (req, res) => {
     db.all("SELECT * FROM tags", (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
@@ -1168,8 +1207,28 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
       const chatId = chat.id._serialized;
       const contact = await chat.getContact();
-      const name = contact.name || contact.pushname || contact.number;
+      
+      // Attempt to retrieve a valid name; do not default to contact.number if we can prevent it, but we need *something*.
+      let name = contact.name || contact.pushname;
       const phone = contact.number;
+      
+      // If we don't have a reliable name yet, let's peek into Puppeteer store for the real name or pushname
+      if (!name || name === phone || name === chatId) {
+         try {
+             const evalName = await waClient.pupPage.evaluate(async (id: string) => {
+                 try {
+                     const w = window as any;
+                     const c = w.Store.Contact.get(id);
+                     return c ? (c.name || c.pushname || null) : null;
+                 } catch(e) { return null; }
+             }, chatId);
+             if (evalName) name = evalName;
+         } catch(e) {}
+      }
+
+      // Fallback only if strictly necessary
+      if (!name) name = phone;
+
       let body = msg.body;
       const timestamp = msg.timestamp * 1000;
       const fromMe = msg.fromMe ? 1 : 0;
@@ -1275,7 +1334,9 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               }
               
               let finalName = chatRow.name;
-              if ((chatRow.name === chatId || chatRow.name === phone || chatRow.name === '') && name !== chatId && name !== phone && name !== '') {
+              
+              // Only override existing name if the new name is better (i.e. not the phone number or ID)
+              if (name && name !== chatId && name !== phone && name !== '') {
                 finalName = name;
               }
 

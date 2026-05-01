@@ -383,6 +383,9 @@ export default function App() {
 
   const fetchData = async () => {
     try {
+      // Background repair of corrupted names (run once per connect/fetchData if necessary, but safe to call anytime)
+      apiFetch('/api/repair-names', { method: 'POST' }).catch(() => {});
+
       const [colsRes, chatsRes, tagsRes, waRes] = await Promise.all([
         apiFetch('/api/columns'),
         apiFetch('/api/chats'),
