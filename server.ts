@@ -607,11 +607,11 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
            const newId = `${row.phone}@c.us`;
            
            // Check if the target @c.us already exists
-           const exists = await new Promise((resolve) => {
-              db.get("SELECT id FROM chats WHERE id = ?", [newId], (err, r) => resolve(!!r));
+           const existingChat = await new Promise<any>((resolve) => {
+              db.get("SELECT id, unread_count, last_message_time FROM chats WHERE id = ?", [newId], (err, r) => resolve(r));
            });
 
-           if (!exists) {
+           if (!existingChat) {
                // Update chat ID
                await new Promise<void>((resolve) => {
                   db.run("UPDATE chats SET id = ? WHERE id = ?", [newId, currentId], () => resolve());
@@ -626,7 +626,39 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
                });
                console.log(`Migrated @lid to @c.us for ${row.phone}`);
                currentId = newId;
-               io.emit('chat_deleted', { id: row.id }); // Will force UI to reload if needed, though they could just refresh
+               io.emit('chat_deleted', { id: row.id }); // Will force UI to reload if needed
+           } else {
+               // Merge! The @c.us chat already exists.
+               console.log(`Merging @lid into existing @c.us for ${row.phone}`);
+               
+               // Move messages ignoring duplicates by ID
+               await new Promise<void>((resolve) => {
+                  db.run("UPDATE OR IGNORE messages SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
+               });
+               // Clean up any messages that failed to move (duplicates)
+               await new Promise<void>((resolve) => {
+                  db.run("DELETE FROM messages WHERE chat_id = ?", [currentId], () => resolve());
+               });
+               
+               // Move tags ignoring duplicates
+               await new Promise<void>((resolve) => {
+                  db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
+               });
+               await new Promise<void>((resolve) => {
+                  db.run("DELETE FROM chat_tags WHERE chat_id = ?", [currentId], () => resolve());
+               });
+
+               // Combine unread count and latest message data if applicable
+               // (For simplicity, just let the next incoming message update it, or compute max time)
+               
+               // Delete the old @lid chat
+               await new Promise<void>((resolve) => {
+                  db.run("DELETE FROM chats WHERE id = ?", [currentId], () => resolve());
+               });
+               
+               currentId = newId;
+               io.emit('chat_deleted', { id: row.id });
+               repaired++;
            }
         }
 
@@ -733,14 +765,13 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
       archive.append(JSON.stringify(exportData, null, 2), { name: 'export_data.json' });
       archive.append(promptText, { name: 'prompt.txt' });
       
-      const dbPath = path.join(process.cwd(), 'kanban.db');
+      const dbPath = path.join(DATA_DIR, 'kanban.db');
       if (fs.existsSync(dbPath)) {
          archive.file(dbPath, { name: 'database.sqlite' });
       }
 
-      const uploadsDir = path.join(process.cwd(), 'uploads');
-      if (fs.existsSync(uploadsDir)) {
-          archive.directory(uploadsDir, 'uploads');
+      if (fs.existsSync(MEDIA_DIR)) {
+          archive.directory(MEDIA_DIR, 'uploads');
       }
 
       await archive.finalize();
@@ -1097,8 +1128,26 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
          } catch (e) {}
 
          // Try reading LID from the contact if accessible directly
-         if (!profilePicUrl && (contactObj as any).id?.fromMe === false && (contactObj as any).id?.server === 'lid') {
-            profilePicUrl = await getProfilePicUrl(waClient, (contactObj as any).id._serialized);
+         if (!profilePicUrl) {
+            let lidToTry = null;
+            if ((contactObj as any).id?.server === 'lid') {
+               lidToTry = (contactObj as any).id._serialized;
+            } else {
+               // Ask puppeteer if this contact has a lid property hidden
+               lidToTry = await waClient.pupPage.evaluate(async (id: string) => {
+                   const w = window as any;
+                   if (w.Store && w.Store.Contact) {
+                       const c = w.Store.Contact.get(id);
+                       if (c && c.lidJid) return c.lidJid;
+                       if (c && c.lid) return c.lid;
+                   }
+                   return null;
+               }, chatId);
+            }
+
+            if (lidToTry) {
+               profilePicUrl = await getProfilePicUrl(waClient, lidToTry);
+            }
          }
       }
 
@@ -1336,12 +1385,25 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
 
       // The user requested to use @c.us for naming and ID, but use @lid for the profile picture fetching.
       // E.g. rawChatId might be "12345...8@lid" or something similar.
-      if (rawChatId.includes('@lid') && phone) {
-         chatId = `${phone}@c.us`; 
-         try {
-             const cUsContact = await waClient.getContactById(chatId);
-             if (cUsContact) contact = cUsContact;
-         } catch(e) {}
+      if (rawChatId.includes('@lid')) {
+         if (!phone) {
+             phone = await waClient.pupPage.evaluate(async (id: string) => {
+                 try {
+                     const w = window as any;
+                     const c = w.Store.Contact.get(id);
+                     if (c && c.phoneNumber) return c.phoneNumber.split('@')[0];
+                 } catch(e) {}
+                 return null;
+             }, rawChatId);
+         }
+         
+         if (phone) {
+             chatId = `${phone}@c.us`; 
+             try {
+                 const cUsContact = await waClient.getContactById(chatId);
+                 if (cUsContact) contact = cUsContact;
+             } catch(e) {}
+         }
       }
       
       // Attempt to retrieve a valid name; do not default to contact.number if we can prevent it, but we need *something*.
