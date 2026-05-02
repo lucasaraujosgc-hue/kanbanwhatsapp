@@ -1377,55 +1377,10 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
       const chat = await msg.getChat();
       if (chat.isGroup) return; // Ignore groups for now
 
-      let rawChatId = chat.id._serialized;
-      let contact = await chat.getContact();
-      
-      let phone = contact.number;
-      let chatId = rawChatId;
-
-      // The user requested to use @c.us for naming and ID, but use @lid for the profile picture fetching.
-      // E.g. rawChatId might be "12345...8@lid" or something similar.
-      if (rawChatId.includes('@lid')) {
-         if (!phone) {
-             phone = await waClient.pupPage.evaluate(async (id: string) => {
-                 try {
-                     const w = window as any;
-                     const c = w.Store.Contact.get(id);
-                     if (c && c.phoneNumber) return c.phoneNumber.split('@')[0];
-                 } catch(e) {}
-                 return null;
-             }, rawChatId);
-         }
-         
-         if (phone) {
-             chatId = `${phone}@c.us`; 
-             try {
-                 const cUsContact = await waClient.getContactById(chatId);
-                 if (cUsContact) contact = cUsContact;
-             } catch(e) {}
-         }
-      }
-      
-      // Attempt to retrieve a valid name; do not default to contact.number if we can prevent it, but we need *something*.
-      let name = contact.name || contact.pushname;
-      
-      // If we don't have a reliable name yet, let's peek into Puppeteer store for the real name or pushname
-      if (!name || name === phone || name === chatId) {
-         try {
-             const evalName = await waClient.pupPage.evaluate(async (id: string) => {
-                 try {
-                     const w = window as any;
-                     const c = w.Store.Contact.get(id);
-                     return c ? (c.name || c.pushname || null) : null;
-                 } catch(e) { return null; }
-             }, chatId);
-             if (evalName) name = evalName;
-         } catch(e) {}
-      }
-
-      // Fallback only if strictly necessary
-      if (!name) name = phone;
-
+      const chatId = chat.id._serialized;
+      const contact = await chat.getContact();
+      const name = contact.name || contact.pushname || contact.number;
+      const phone = contact.number;
       let body = msg.body;
       const timestamp = msg.timestamp * 1000;
       const fromMe = msg.fromMe ? 1 : 0;
@@ -1479,10 +1434,28 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
 
       let profilePic: string | null = null;
       try {
-        // Tenta buscar a foto atualizada
         let profilePicUrl = await getProfilePicUrl(waClient, chatId);
         
-        // Se falhar no Puppeteer, tenta o método nativo do waClient como backup
+        if (!profilePicUrl) {
+           let lidToTry = null;
+           if ((contact as any).id?.server === 'lid') {
+              lidToTry = (contact as any).id._serialized;
+           } else {
+              lidToTry = await waClient.pupPage.evaluate(async (id: string) => {
+                  const w = window as any;
+                  if (w.Store && w.Store.Contact) {
+                      const c = w.Store.Contact.get(id);
+                      if (c && c.lidJid) return c.lidJid;
+                      if (c && c.lid) return c.lid;
+                  }
+                  return null;
+              }, chatId);
+           }
+           if (lidToTry) {
+              profilePicUrl = await getProfilePicUrl(waClient, lidToTry);
+           }
+        }
+        
         if (!profilePicUrl) {
           profilePicUrl = await waClient.getProfilePicUrl(chatId).catch(() => null);
         }
