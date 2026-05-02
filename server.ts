@@ -1025,23 +1025,29 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
       for (const row of rows) {
         if (row.id.includes('@lid') || (row.phone && row.phone.length > 14)) {
-          let resolvedPhone = await waClient.pupPage.evaluate(async (lid) => {
+          let resolvedInfo = await waClient.pupPage.evaluate(async (lid) => {
             try {
               const w = window as any;
               if (w.Store && w.Store.Contact) {
                 const contacts = w.Store.Contact.getModelsArray();
                 const realContact = contacts.find(c => c.lidJid === lid && c.id && c.id.server === 'c.us');
                 if (realContact && realContact.id && realContact.id.user) {
-                  return realContact.id.user;
+                  return { phone: realContact.id.user, name: realContact.verifiedName || realContact.name || realContact.pushname || realContact.displayName };
                 }
                 const lidContact = w.Store.Contact.get(lid);
-                if (lidContact && lidContact.phoneNumber) {
-                  return lidContact.phoneNumber.split('@')[0];
+                if (lidContact) {
+                  return { 
+                    phone: (lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null), 
+                    name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
+                  };
                 }
               }
             } catch(e) {}
-            return null;
+            return { phone: null, name: null };
           }, row.id);
+          
+          let resolvedPhone = resolvedInfo.phone;
+          let resolvedName = resolvedInfo.name;
 
           if (!resolvedPhone && (row.id.includes('105403295727623') || row.phone === '105403295727623')) {
             resolvedPhone = '557591167094';
@@ -1052,7 +1058,9 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
             if (row.id !== newId) {
               await new Promise<void>((resolve) => {
                 let currentName = row.name;
-                if (currentName === row.phone || currentName === row.id.split('@')[0]) {
+                if (resolvedName && (currentName === row.phone || currentName === row.id.split('@')[0])) {
+                  currentName = resolvedName;
+                } else if (currentName === row.phone || currentName === row.id.split('@')[0]) {
                   currentName = resolvedPhone;
                 }
                 db.run("UPDATE chats SET id = ?, phone = ?, name = ? WHERE id = ?", [newId, resolvedPhone, currentName, row.id], (err) => {
@@ -1183,12 +1191,12 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
       let rawChatId = chat.id._serialized;
       let contact = await chat.getContact();
-      let name = contact.name || contact.pushname || contact.number;
+      let name = (contact as any).verifiedName || contact.name || contact.pushname || contact.number;
       let phone = contact.number;
 
       // Handle LIDs to avoid creating separate chats for the same contact
       if (rawChatId.includes('@lid') || (phone && phone.length > 14)) {
-        let resolvedPhone = await waClient.pupPage.evaluate(async (lid) => {
+        let resolvedInfo = await waClient.pupPage.evaluate(async (lid) => {
           try {
             const w = window as any;
             if (w.Store && w.Store.Contact) {
@@ -1196,21 +1204,31 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               // Try to find the c.us contact that has this lidJid
               const realContact = contacts.find(c => c.lidJid === lid && c.id && c.id.server === 'c.us');
               if (realContact && realContact.id && realContact.id.user) {
-                return realContact.id.user;
+                return { phone: realContact.id.user, name: realContact.verifiedName || realContact.name || realContact.pushname || realContact.displayName };
               }
               // Try fetching from the lid contact itself
               const lidContact = w.Store.Contact.get(lid);
-              if (lidContact && lidContact.phoneNumber) {
-                return lidContact.phoneNumber.split('@')[0];
+              if (lidContact) {
+                return { 
+                  phone: (lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null), 
+                  name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
+                };
               }
             }
           } catch(e) {}
-          return null;
+          return { phone: null, name: null };
         }, rawChatId);
         
+        let resolvedPhone = resolvedInfo.phone;
+        let resolvedName = resolvedInfo.name;
+
         // Custom override for this specific LID
         if (!resolvedPhone && (rawChatId.includes('105403295727623') || phone === '105403295727623')) {
            resolvedPhone = '557591167094';
+        }
+
+        if (resolvedName && name === contact.number) {
+           name = resolvedName;
         }
 
         if (resolvedPhone) {
@@ -1236,7 +1254,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       let mediaName = null;
       let transcription = null;
 
-      if (msg.hasMedia) {
+      if (msg.hasMedia && msg.type !== 'interactive' && msg.type !== 'interactive_response') {
         try {
           const media = await msg.downloadMedia();
           if (media) {
@@ -1271,8 +1289,12 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               }
             }
           }
-        } catch (err) {
-          console.error('Error downloading media:', err);
+        } catch (err: any) {
+          if (err && err.message && err.message.includes('webMediaType is invalid')) {
+            // Silently ignore interactive/unsupported media types
+          } else {
+            console.error('Error downloading media:', err);
+          }
         }
       }
 
