@@ -146,6 +146,11 @@ db.serialize(() => {
     }
   });
 
+  // Hotfix delete 0@c.us (corrupted or dummy chat)
+  db.run("DELETE FROM messages WHERE chat_id = '0@c.us'");
+  db.run("DELETE FROM chat_tags WHERE chat_id = '0@c.us'");
+  db.run("DELETE FROM chats WHERE id = '0@c.us' OR id = '0' OR phone = '0'");
+
   // Insert default columns if empty
   db.get("SELECT COUNT(*) as count FROM columns", (err, row: any) => {
     if (row && row.count === 0) {
@@ -894,6 +899,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
   const syncChatProfilePic = async (chatId: string) => {
     if (!waClient || waStatus !== 'connected') return null;
+    if (!chatId || chatId === '0@c.us') return null;
 
     try {
       const chat = await waClient.getChatById(chatId);
@@ -978,12 +984,16 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       }
 
       try {
+        let count = 0;
         for (const row of rows) {
-          await syncChatProfilePic(row.id);
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          if (row.id && row.id !== '0@c.us' && !row.id.startsWith('0@')) {
+            await syncChatProfilePic(row.id);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            count++;
+          }
         }
 
-        res.json({ success: true, total: rows.length });
+        res.json({ success: true, total: count });
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
@@ -1133,8 +1143,10 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         }
 
         for (const row of rows) {
-          await syncChatProfilePic(row.id);
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          if (row.id && row.id !== '0@c.us' && !row.id.startsWith('0@')) {
+             await syncChatProfilePic(row.id);
+             await new Promise(resolve => setTimeout(resolve, 1000));
+          }
         }
       });
     });
