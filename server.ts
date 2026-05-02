@@ -11,6 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
+import archiver from 'archiver';
 import { GoogleGenAI } from '@google/genai';
 import axios from 'axios';
 
@@ -628,6 +629,104 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       }
       res.json({ success: true, repaired });
     });
+  });
+
+  app.get('/api/export', async (req, res) => {
+    try {
+      const getAll = (query: string): Promise<any[]> => new Promise((resolve, reject) => {
+        db.all(query, (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows);
+        });
+      });
+
+      const [columns, chats, tags, chat_tags, messages, media_table] = await Promise.all([
+        getAll("SELECT * FROM columns ORDER BY position ASC"),
+        getAll("SELECT * FROM chats"),
+        getAll("SELECT * FROM tags"),
+        getAll("SELECT * FROM chat_tags"),
+        getAll("SELECT * FROM messages"),
+        getAll("SELECT * FROM media")
+      ]);
+
+      const exportData = {
+        columns,
+        chats: chats.map(chat => {
+           // attach tags to chat as convenience
+           const thisChatTags = chat_tags.filter(ct => ct.chat_id === chat.id).map(ct => ct.tag_id);
+           return { ...chat, tag_ids: thisChatTags };
+        }),
+        tags,
+        messages,
+        media: media_table
+      };
+
+      const promptText = `
+Você está recebendo uma exportação de dados do sistema "WhatsKanban".
+O objetivo desta exportação é facilitar a migração para o seu próximo sistema de CRM ou Kanban.
+
+No arquivo \`export_data.json\`, você encontrará os dados perfeitamente estruturados e formatados, extraídos das tabelas do banco de dados (também incluído como \`database.sqlite\`). Além disso, a pasta \`uploads/\` contém todos os arquivos e mídias do sistema.
+
+### Como a estrutura do \`export_data.json\` está mapeada e estruturada:
+
+1. **\`columns\`** (Status/Fases do Kanban):
+   - Campos: \`id\`, \`name\` (nome da coluna), \`color\`, \`position\`.
+   - Lógica: Defina seus status de funil usando estas colunas.
+
+2. **\`tags\`** (Etiquetas):
+   - Campos: \`id\`, \`name\`, \`color\`.
+   - Lógica: Crie tags/etiquetas para segmentar leads ou conversas no novo sistema.
+
+3. **\`chats\`** (Contatos / Clientes / Conversas):
+   - Campos: \`id\` (ID único do WhatsApp nativo), \`name\` (Nome do Contato), \`phone\` (Telefone), \`profile_pic\` (URL ou Base64), \`column_id\` (em qual status/coluna do funil ele está), \`unread_count\`, \`last_message\`, \`last_message_time\`.
+   - Extras Adicionados Para Facilitar a Migração: \`tag_ids\` (Array com as IDs das tags associadas ao contato).
+   - Lógica: Ao criar um Contato/Cliente, defina o \`status\` com base no \`column_id\` atrelado a este \`chat\`, e adicione ao contato suas \`tags\` correspondentes com base na array de \`tag_ids\`.
+
+4. **\`messages\`** (Histórico de Conversas de Cada Contato):
+   - Campos: \`id\`, \`chat_id\` (referência ao ID do contato), \`from_me\` (0 = recebida, 1 = enviada por nós), \`body\` (texto descritivo da mensagem), \`timestamp\`, \`is_media\` (booleano indicando que contém anexo).
+   - Lógica: Relacione todo este histórico para o contato equivalente via \`chat_id\`.
+
+5. **\`media\`** (Anexos, Áudios, Imagens das conversas):
+   - Campos: \`id\`, \`message_id\` (qual mensagem possui essa mídia), \`file_path\` (caminho extraído relativo a pasta \`uploads/\`, Ex: uploads/nome_do_arquivo), \`file_type\` (mimetype original da mídia).
+   - Lógica: Se você estiver fazendo um import de arquivos anexos, leia os arquivos localmente a partir da pasta \`uploads/\` enviada nesse mesmo .zip e associe à respectiva mensagem.
+
+Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na inserção das suas próprias tabelas ou rotinas de migração (via API ou SQL INSERTs), respeitando os mesmos relacionamentos.
+`;
+
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', 'attachment; filename="whatskanban_export.zip"');
+
+      const archive = archiver('zip', {
+        zlib: { level: 9 } // Sets the compression level.
+      });
+
+      archive.on('error', function(err) {
+        throw err;
+      });
+
+      archive.pipe(res);
+
+      archive.append(JSON.stringify(exportData, null, 2), { name: 'export_data.json' });
+      archive.append(promptText, { name: 'prompt.txt' });
+      
+      const dbPath = path.join(process.cwd(), 'kanban.db');
+      if (fs.existsSync(dbPath)) {
+         archive.file(dbPath, { name: 'database.sqlite' });
+      }
+
+      const uploadsDir = path.join(process.cwd(), 'uploads');
+      if (fs.existsSync(uploadsDir)) {
+          archive.directory(uploadsDir, 'uploads');
+      }
+
+      await archive.finalize();
+
+    } catch (e: any) {
+      console.error('Export error:', e);
+      if (!res.headersSent) {
+          res.status(500).json({ error: e.message });
+      }
+    }
   });
 
   app.get('/api/tags', (req, res) => {

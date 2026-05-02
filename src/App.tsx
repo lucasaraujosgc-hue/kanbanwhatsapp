@@ -883,6 +883,14 @@ export default function App() {
               >
                 <Bot size={16} /> Base de Conhecimento IA
               </button>
+              
+              <a 
+                href="/api/export" 
+                download="whatskanban_export.zip"
+                className="w-full mt-2 flex items-center justify-center gap-2 text-sm text-emerald-600 bg-emerald-50 py-2.5 rounded-lg hover:bg-emerald-100 transition-colors font-medium border border-emerald-200 shadow-sm"
+              >
+                <Download size={16} /> Exportar Sistema (.zip)
+              </a>
             </div>
 
             <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 mt-6">Filtro de Tags</h2>
