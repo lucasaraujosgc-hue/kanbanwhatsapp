@@ -600,27 +600,57 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
       let repaired = 0;
       for (const row of rows) {
-        if (!row.name || row.name === row.id || row.name === row.phone) {
+        let currentId = row.id;
+
+        // Migrate @lid to @c.us if possible
+        if (currentId.includes('@lid') && row.phone) {
+           const newId = `${row.phone}@c.us`;
+           
+           // Check if the target @c.us already exists
+           const exists = await new Promise((resolve) => {
+              db.get("SELECT id FROM chats WHERE id = ?", [newId], (err, r) => resolve(!!r));
+           });
+
+           if (!exists) {
+               // Update chat ID
+               await new Promise<void>((resolve) => {
+                  db.run("UPDATE chats SET id = ? WHERE id = ?", [newId, currentId], () => resolve());
+               });
+               // Update all messages
+               await new Promise<void>((resolve) => {
+                  db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
+               });
+               // Update chat tags
+               await new Promise<void>((resolve) => {
+                  db.run("UPDATE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
+               });
+               console.log(`Migrated @lid to @c.us for ${row.phone}`);
+               currentId = newId;
+               io.emit('chat_deleted', { id: row.id }); // Will force UI to reload if needed, though they could just refresh
+           }
+        }
+
+        if (!row.name || row.name === currentId || row.name === row.phone) {
            const evalData = await waClient.pupPage.evaluate(async (id: string) => {
               try {
                  const w = window as any;
                  const c = w.Store.Contact.get(id);
                  return c ? (c.name || c.pushname) : null;
               } catch(e) { return null; }
-           }, row.id);
+           }, currentId);
 
-           if (evalData && evalData !== row.id && evalData !== row.phone) {
-             db.run("UPDATE chats SET name = ? WHERE id = ?", [evalData, row.id]);
-             io.emit('chat_updated', { id: row.id, name: evalData });
+           if (evalData && evalData !== currentId && evalData !== row.phone) {
+             db.run("UPDATE chats SET name = ? WHERE id = ?", [evalData, currentId]);
+             io.emit('chat_updated', { id: currentId, name: evalData });
              repaired++;
            } else {
              // Let's try native getContact
              try {
-                const contact = await waClient.getContactById(row.id);
+                const contact = await waClient.getContactById(currentId);
                 const nativeName = contact.name || contact.pushname;
-                if (nativeName && nativeName !== row.id && nativeName !== row.phone) {
-                   db.run("UPDATE chats SET name = ? WHERE id = ?", [nativeName, row.id]);
-                   io.emit('chat_updated', { id: row.id, name: nativeName });
+                if (nativeName && nativeName !== currentId && nativeName !== row.phone) {
+                   db.run("UPDATE chats SET name = ? WHERE id = ?", [nativeName, currentId]);
+                   io.emit('chat_updated', { id: currentId, name: nativeName });
                    repaired++;
                 }
              } catch (e) {}
@@ -1298,12 +1328,24 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
       const chat = await msg.getChat();
       if (chat.isGroup) return; // Ignore groups for now
 
-      const chatId = chat.id._serialized;
-      const contact = await chat.getContact();
+      let rawChatId = chat.id._serialized;
+      let contact = await chat.getContact();
+      
+      let phone = contact.number;
+      let chatId = rawChatId;
+
+      // The user requested to use @c.us for naming and ID, but use @lid for the profile picture fetching.
+      // E.g. rawChatId might be "12345...8@lid" or something similar.
+      if (rawChatId.includes('@lid') && phone) {
+         chatId = `${phone}@c.us`; 
+         try {
+             const cUsContact = await waClient.getContactById(chatId);
+             if (cUsContact) contact = cUsContact;
+         } catch(e) {}
+      }
       
       // Attempt to retrieve a valid name; do not default to contact.number if we can prevent it, but we need *something*.
       let name = contact.name || contact.pushname;
-      const phone = contact.number;
       
       // If we don't have a reliable name yet, let's peek into Puppeteer store for the real name or pushname
       if (!name || name === phone || name === chatId) {
