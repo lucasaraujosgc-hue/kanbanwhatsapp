@@ -640,13 +640,12 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         });
       });
 
-      const [columns, chats, tags, chat_tags, messages, media_table] = await Promise.all([
+      const [columns, chats, tags, chat_tags, messages] = await Promise.all([
         getAll("SELECT * FROM columns ORDER BY position ASC"),
         getAll("SELECT * FROM chats"),
         getAll("SELECT * FROM tags"),
         getAll("SELECT * FROM chat_tags"),
-        getAll("SELECT * FROM messages"),
-        getAll("SELECT * FROM media")
+        getAll("SELECT * FROM messages")
       ]);
 
       const exportData = {
@@ -657,8 +656,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
            return { ...chat, tag_ids: thisChatTags };
         }),
         tags,
-        messages,
-        media: media_table
+        messages
       };
 
       const promptText = `
@@ -683,12 +681,8 @@ No arquivo \`export_data.json\`, você encontrará os dados perfeitamente estrut
    - Lógica: Ao criar um Contato/Cliente, defina o \`status\` com base no \`column_id\` atrelado a este \`chat\`, e adicione ao contato suas \`tags\` correspondentes com base na array de \`tag_ids\`.
 
 4. **\`messages\`** (Histórico de Conversas de Cada Contato):
-   - Campos: \`id\`, \`chat_id\` (referência ao ID do contato), \`from_me\` (0 = recebida, 1 = enviada por nós), \`body\` (texto descritivo da mensagem), \`timestamp\`, \`is_media\` (booleano indicando que contém anexo).
-   - Lógica: Relacione todo este histórico para o contato equivalente via \`chat_id\`.
-
-5. **\`media\`** (Anexos, Áudios, Imagens das conversas):
-   - Campos: \`id\`, \`message_id\` (qual mensagem possui essa mídia), \`file_path\` (caminho extraído relativo a pasta \`uploads/\`, Ex: uploads/nome_do_arquivo), \`file_type\` (mimetype original da mídia).
-   - Lógica: Se você estiver fazendo um import de arquivos anexos, leia os arquivos localmente a partir da pasta \`uploads/\` enviada nesse mesmo .zip e associe à respectiva mensagem.
+   - Campos: \`id\`, \`chat_id\` (referência ao ID do contato), \`from_me\` (0 = recebida, 1 = enviada por nós), \`body\` (texto descritivo da mensagem), \`timestamp\`, \`media_url\` (caminho do anexo a partir da pasta /uploads, se existir), \`media_type\` (tipo MIME), \`media_name\` (nome do arquivo original).
+   - Lógica: Relacione todo este histórico para o contato equivalente via \`chat_id\`. Se houver "media_url", o arquivo pode ser lido na pasta \`uploads/\` do zip e restaurado na nova plataforma com base no "media_type" e "media_name".
 
 Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na inserção das suas próprias tabelas ou rotinas de migração (via API ou SQL INSERTs), respeitando os mesmos relacionamentos.
 `;
