@@ -602,93 +602,103 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       for (const row of rows) {
         let currentId = row.id;
 
-        // Migrate @lid to @c.us if possible
-        if (currentId.includes('@lid')) {
-           // We can't trust row.phone if it might just be the LID digits.
-           // Let's ask puppeteer for the real phone number of this LID
-           let realPhone = await waClient.pupPage.evaluate(async (id: string) => {
-               try {
-                   const w = window as any;
-                   const c = w.Store.Contact.get(id);
-                   if (c && c.phoneNumber) return c.phoneNumber.split('@')[0];
-               } catch(e) {}
-               return null;
-           }, currentId);
+        // Detect if this is a corrupted LID mapped to @c.us (e.g. 105403295727623@c.us has length 15 for the digits)
+        // or if it's a raw @lid
+        const isLid = currentId.includes('@lid');
+        const isCorruptedLid = currentId.endsWith('@c.us') && currentId.split('@')[0].length > 14;
+
+        // Migrate @lid or corrupted @c.us to actual phone number @c.us
+        if (isLid || isCorruptedLid) {
+           let realPhone = null;
+           
+           if (!isCorruptedLid) {
+               // Let's ask puppeteer for the real phone number of this LID
+               realPhone = await waClient.pupPage.evaluate(async (id: string) => {
+                   try {
+                       const w = window as any;
+                       const c = w.Store.Contact.get(id);
+                       if (c && c.phoneNumber) return c.phoneNumber.split('@')[0];
+                   } catch(e) {}
+                   return null;
+               }, currentId);
+           }
            
            // If puppeteer doesn't have it, try native fallback
            if (!realPhone) {
               try {
-                  const contact = await waClient.getContactById(currentId);
-                  if (contact && contact.number) {
-                     realPhone = contact.number;
-                  }
+                  // For corrupted lids, we might need to query the server or just find it by searching history...
+                  // Better: wait for a new message to create the correct chat
               } catch(e) {}
            }
            
-           // If we still don't have it, AND the row.phone exists and doesn't look like a LID (e.g. LID might be length 15+, while phone is 12-13)
-           // we can fallback to row.phone, but let's be safe.
-           if (!realPhone && row.phone && row.phone.length < 15) {
+           // If we still don't have it, and the row.phone exists and DOES NOT look like a LID (valid phone is ~12-13 digits)
+           if (!realPhone && row.phone && row.phone.length > 8 && row.phone.length <= 14) {
                realPhone = row.phone;
            }
 
            if (realPhone) {
-               const newId = `${realPhone}@c.us`;
+               const newId = `${realPhone}@c.us`; 
                
-               // Check if the target @c.us already exists
-               const existingChat = await new Promise<any>((resolve) => {
-                  db.get("SELECT id, unread_count, last_message_time FROM chats WHERE id = ?", [newId], (err, r) => resolve(r));
-               });
-
-               if (!existingChat) {
-                   // Update chat ID and fix phone
-                   await new Promise<void>((resolve) => {
-                      db.run("UPDATE chats SET id = ?, phone = ? WHERE id = ?", [newId, realPhone, currentId], () => resolve());
-                   });
-                   // Update all messages
-                   await new Promise<void>((resolve) => {
-                      db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
-                   });
-                   // Update chat tags
-                   await new Promise<void>((resolve) => {
-                      db.run("UPDATE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
-                   });
-                   console.log(`Migrated @lid to @c.us for ${realPhone}`);
-                   currentId = newId;
-                   io.emit('chat_deleted', { id: row.id }); // force UI to reload
-               } else {
-                   // Merge! The @c.us chat already exists.
-                   console.log(`Merging @lid into existing @c.us for ${realPhone}`);
-                   
-                   // Move messages ignoring duplicates by ID
-                   await new Promise<void>((resolve) => {
-                      db.run("UPDATE OR IGNORE messages SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
-                   });
-                   // Clean up any messages that failed to move (duplicates)
-                   await new Promise<void>((resolve) => {
-                      db.run("DELETE FROM messages WHERE chat_id = ?", [currentId], () => resolve());
-                   });
-                   
-                   // Move tags ignoring duplicates
-                   await new Promise<void>((resolve) => {
-                      db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
-                   });
-                   await new Promise<void>((resolve) => {
-                      db.run("DELETE FROM chat_tags WHERE chat_id = ?", [currentId], () => resolve());
+               // If existing ID is exactly the new ID, nothing to migrate
+               if (currentId !== newId) {
+                   // Check if the target @c.us already exists
+                   const existingChat = await new Promise<any>((resolve) => {
+                      db.get("SELECT id, unread_count, last_message_time FROM chats WHERE id = ?", [newId], (err, r) => resolve(r));
                    });
 
-                   // Delete the old @lid chat
-                   await new Promise<void>((resolve) => {
-                      db.run("DELETE FROM chats WHERE id = ?", [currentId], () => resolve());
-                   });
-                   
-                   currentId = newId;
-                   io.emit('chat_deleted', { id: row.id });
+                   if (!existingChat) {
+                       // Update chat ID and fix phone
+                       await new Promise<void>((resolve) => {
+                          db.run("UPDATE chats SET id = ?, phone = ? WHERE id = ?", [newId, realPhone, currentId], () => resolve());
+                       });
+                       // Update all messages
+                       await new Promise<void>((resolve) => {
+                          db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
+                       });
+                       // Update chat tags
+                       await new Promise<void>((resolve) => {
+                          db.run("UPDATE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
+                       });
+                       console.log(`Migrated ${currentId} to @c.us for ${realPhone}`);
+                       currentId = newId;
+                       io.emit('chat_deleted', { id: row.id }); // force UI to reload
+                   } else {
+                       // Merge! The @c.us chat already exists.
+                       console.log(`Merging ${currentId} into existing @c.us for ${realPhone}`);
+                       
+                       // Move messages ignoring duplicates by ID
+                       await new Promise<void>((resolve) => {
+                          db.run("UPDATE OR IGNORE messages SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
+                       });
+                       // Clean up any messages that failed to move (duplicates)
+                       await new Promise<void>((resolve) => {
+                          db.run("DELETE FROM messages WHERE chat_id = ?", [currentId], () => resolve());
+                       });
+                       
+                       // Move tags ignoring duplicates
+                       await new Promise<void>((resolve) => {
+                          db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
+                       });
+                       await new Promise<void>((resolve) => {
+                          db.run("DELETE FROM chat_tags WHERE chat_id = ?", [currentId], () => resolve());
+                       });
+
+                       // Delete the old chat
+                       await new Promise<void>((resolve) => {
+                          db.run("DELETE FROM chats WHERE id = ?", [currentId], () => resolve());
+                       });
+                       
+                       currentId = newId;
+                       io.emit('chat_deleted', { id: row.id });
+                   }
+                   repaired++;
                }
-               repaired++;
            }
         }
 
-        if (!row.name || row.name === currentId || row.name === row.phone) {
+        const isCorruptedLidData = (!row.name || row.name === currentId || row.name === row.phone || (row.name.length > 14 && /^\d+$/.test(row.name)));
+
+        if (isCorruptedLidData) {
            const evalData = await waClient.pupPage.evaluate(async (id: string) => {
               try {
                  const w = window as any;
@@ -1411,8 +1421,9 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
 
       // Ensure we use @c.us for the ID instead of @lid
       if (rawChatId.includes('@lid')) {
-         if (!phone) {
-             phone = await waClient.pupPage.evaluate(async (id: string) => {
+         // LIDs usually have long numeric strings for their 'number'. If it's too long, don't trust it.
+         if (!phone || phone.length > 14 || phone === rawChatId.split('@')[0]) {
+             const realPhone = await waClient.pupPage.evaluate(async (id: string) => {
                  try {
                      const w = window as any;
                      const c = w.Store.Contact.get(id);
@@ -1420,9 +1431,13 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
                  } catch(e) {}
                  return null;
              }, rawChatId);
+             
+             if (realPhone) {
+                 phone = realPhone;
+             }
          }
          
-         if (phone) {
+         if (phone && phone.length <= 14) {
              chatId = `${phone}@c.us`; 
              try {
                  const cUsContact = await waClient.getContactById(chatId);
@@ -1431,6 +1446,9 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
                      name = contact.name || contact.pushname || contact.number || name;
                  }
              } catch(e) {}
+         } else {
+             // If we couldn't get a real phone, keep the rawChatId to avoid invalid @c.us creations
+             chatId = rawChatId;
          }
       }
       

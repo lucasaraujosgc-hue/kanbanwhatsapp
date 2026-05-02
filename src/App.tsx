@@ -855,12 +855,28 @@ export default function App() {
               )}
               
               {waStatus === 'connected' && (
-                <button 
-                  onClick={handleResetWa}
-                  className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-rose-600 bg-rose-50 py-2 rounded-lg hover:bg-rose-100 transition-colors font-medium border border-rose-100"
-                >
-                  <RefreshCw size={12} /> Desconectar
-                </button>
+                <div className="mt-2 space-y-2">
+                  <button 
+                    onClick={async () => {
+                      try {
+                        const res = await apiFetch('/api/repair-names', { method: 'POST' });
+                        alert(`Contatos corrigidos!`);
+                        fetchData();
+                      } catch(e) {
+                        alert('Erro ao reparar contatos');
+                      }
+                    }}
+                    className="w-full flex items-center justify-center gap-1 text-xs text-blue-600 bg-blue-50 py-2 rounded-lg hover:bg-blue-100 transition-colors font-medium border border-blue-100"
+                  >
+                    <RefreshCw size={12} /> Corrigir .lid 
+                  </button>
+                  <button 
+                    onClick={handleResetWa}
+                    className="w-full flex items-center justify-center gap-1 text-xs text-rose-600 bg-rose-50 py-2 rounded-lg hover:bg-rose-100 transition-colors font-medium border border-rose-100"
+                  >
+                    <RefreshCw size={12} /> Desconectar
+                  </button>
+                </div>
               )}
               
               {(waStatus === 'error' || waStatus === 'disconnected') && (
