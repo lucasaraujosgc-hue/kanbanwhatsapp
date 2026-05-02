@@ -129,6 +129,20 @@ db.serialize(() => {
   db.run(`ALTER TABLE messages ADD COLUMN media_name TEXT`, (err) => { /* ignore */ });
   db.run(`ALTER TABLE messages ADD COLUMN transcription TEXT`, (err) => { /* ignore */ });
 
+  // Hotfix migration for LIDs to correct the specific missing contact
+  // We use INSERT OR REPLACE for chats and then delete the old one to avoid UNIQUE constraint failed if the c.us chat already exists.
+  db.get("SELECT * FROM chats WHERE id LIKE '%105403295727623%' OR phone LIKE '%105403295727623%'", (err, row: any) => {
+    if (row && row.id !== '557591167094@c.us') {
+      db.run("INSERT OR REPLACE INTO chats (id, name, phone, column_id, order_index, last_message, last_message_time, unread_count, profile_pic, last_message_from_me, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ['557591167094@c.us', row.name, '557591167094', row.column_id, row.order_index, row.last_message, row.last_message_time, row.unread_count, row.profile_pic, row.last_message_from_me, row.notes], () => {
+          db.run("UPDATE messages SET chat_id = '557591167094@c.us' WHERE chat_id = ?", [row.id]);
+          db.run("UPDATE OR IGNORE chat_tags SET chat_id = '557591167094@c.us' WHERE chat_id = ?", [row.id]);
+          db.run("DELETE FROM chats WHERE id = ?", [row.id]);
+        }
+      );
+    }
+  });
+
   // Insert default columns if empty
   db.get("SELECT COUNT(*) as count FROM columns", (err, row: any) => {
     if (row && row.count === 0) {
@@ -1069,10 +1083,44 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       const chat = await msg.getChat();
       if (chat.isGroup) return; // Ignore groups for now
 
-      const chatId = chat.id._serialized;
-      const contact = await chat.getContact();
-      const name = contact.name || contact.pushname || contact.number;
-      const phone = contact.number;
+      let rawChatId = chat.id._serialized;
+      let contact = await chat.getContact();
+      let name = contact.name || contact.pushname || contact.number;
+      let phone = contact.number;
+
+      // Handle LIDs to avoid creating separate chats for the same contact
+      if (rawChatId.includes('@lid')) {
+        const resolvedPhone = await waClient.pupPage.evaluate(async (lid) => {
+          try {
+            const w = window as any;
+            if (w.Store && w.Store.Contact) {
+              const contacts = w.Store.Contact.getModelsArray();
+              // Try to find the c.us contact that has this lidJid
+              const realContact = contacts.find(c => c.lidJid === lid && c.id && c.id.server === 'c.us');
+              if (realContact && realContact.id && realContact.id.user) {
+                return realContact.id.user;
+              }
+              // Try fetching from the lid contact itself
+              const lidContact = w.Store.Contact.get(lid);
+              if (lidContact && lidContact.phoneNumber) {
+                return lidContact.phoneNumber.split('@')[0];
+              }
+            }
+          } catch(e) {}
+          return null;
+        }, rawChatId);
+        
+        if (resolvedPhone) {
+          phone = resolvedPhone;
+        }
+      }
+
+      // Important: Use the resolved phone number for the chatId if it was a LID
+      let chatId = rawChatId;
+      if (phone && phone.length <= 15 && phone !== contact.number) {
+        chatId = `${phone}@c.us`;
+      }
+
       let body = msg.body;
       const timestamp = msg.timestamp * 1000;
       const fromMe = msg.fromMe ? 1 : 0;
