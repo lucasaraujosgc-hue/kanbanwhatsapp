@@ -130,11 +130,14 @@ db.serialize(() => {
   db.run(`ALTER TABLE messages ADD COLUMN transcription TEXT`, (err) => { /* ignore */ });
 
   // Hotfix migration for LIDs to correct the specific missing contact
+  // Hotfix migration for LIDs to correct the specific missing contact
   // We use INSERT OR REPLACE for chats and then delete the old one to avoid UNIQUE constraint failed if the c.us chat already exists.
   db.get("SELECT * FROM chats WHERE id LIKE '%105403295727623%' OR phone LIKE '%105403295727623%'", (err, row: any) => {
     if (row && row.id !== '557591167094@c.us') {
-      db.run("INSERT OR REPLACE INTO chats (id, name, phone, column_id, order_index, last_message, last_message_time, unread_count, profile_pic, last_message_from_me, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ['557591167094@c.us', row.name, '557591167094', row.column_id, row.order_index, row.last_message, row.last_message_time, row.unread_count, row.profile_pic, row.last_message_from_me, row.notes], () => {
+      let currentName = row.name;
+      if (currentName === '105403295727623') currentName = '557591167094';
+      db.run("INSERT OR REPLACE INTO chats (id, name, phone, column_id, last_message, last_message_time, unread_count, profile_pic, last_message_from_me) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ['557591167094@c.us', currentName, '557591167094', row.column_id, row.last_message, row.last_message_time, row.unread_count, row.profile_pic, row.last_message_from_me], () => {
           db.run("UPDATE messages SET chat_id = '557591167094@c.us' WHERE chat_id = ?", [row.id]);
           db.run("UPDATE OR IGNORE chat_tags SET chat_id = '557591167094@c.us' WHERE chat_id = ?", [row.id]);
           db.run("DELETE FROM chats WHERE id = ?", [row.id]);
@@ -900,6 +903,12 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         const contact = await chat.getContact();
         if (contact) {
           name = contact.name || contact.pushname || contact.number || name;
+          if (name && name.length > 14 && name.startsWith('105')) {
+             // specific workaround if it falls back to a LID phone number
+             if (chatId.includes('105403295727623') || name === '105403295727623' || chatId === '557591167094@c.us') {
+               name = '557591167094';
+             }
+          }
         }
       } catch (e) {
         // Ignore error for @lid contacts or other special contacts
@@ -978,6 +987,79 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
+    });
+  });
+
+  app.post('/api/repair-names', async (req, res) => {
+    if (!waClient || waStatus !== 'connected') {
+      return res.status(400).json({ error: 'WhatsApp not connected' });
+    }
+
+    // specific fix for 105403295727623 -> 557591167094
+    db.run("UPDATE chats SET id = '557591167094@c.us', phone = '557591167094', name = '557591167094' WHERE id LIKE '%105403295727623%' OR phone LIKE '%105403295727623%'", (err) => {
+      if(err && err.message.includes('UNIQUE constraint failed')) {
+         // It exists, merge it
+         db.run("UPDATE messages SET chat_id = '557591167094@c.us' WHERE chat_id LIKE '%105403295727623%'");
+         db.run("UPDATE OR IGNORE chat_tags SET chat_id = '557591167094@c.us' WHERE chat_id LIKE '%105403295727623%'");
+         db.run("DELETE FROM chats WHERE id LIKE '%105403295727623%'");
+      }
+    });
+
+    db.all("SELECT id, name, phone FROM chats", async (err, rows: any[]) => {
+      if (err) return res.status(500).json({ error: err.message });
+      let fixed = 0;
+
+      for (const row of rows) {
+        if (row.id.includes('@lid') || (row.phone && row.phone.length > 14)) {
+          let resolvedPhone = await waClient.pupPage.evaluate(async (lid) => {
+            try {
+              const w = window as any;
+              if (w.Store && w.Store.Contact) {
+                const contacts = w.Store.Contact.getModelsArray();
+                const realContact = contacts.find(c => c.lidJid === lid && c.id && c.id.server === 'c.us');
+                if (realContact && realContact.id && realContact.id.user) {
+                  return realContact.id.user;
+                }
+                const lidContact = w.Store.Contact.get(lid);
+                if (lidContact && lidContact.phoneNumber) {
+                  return lidContact.phoneNumber.split('@')[0];
+                }
+              }
+            } catch(e) {}
+            return null;
+          }, row.id);
+
+          if (!resolvedPhone && (row.id.includes('105403295727623') || row.phone === '105403295727623')) {
+            resolvedPhone = '557591167094';
+          }
+
+          if (resolvedPhone) {
+            const newId = `${resolvedPhone}@c.us`;
+            if (row.id !== newId) {
+              await new Promise<void>((resolve) => {
+                let currentName = row.name;
+                if (currentName === row.phone || currentName === row.id.split('@')[0]) {
+                  currentName = resolvedPhone;
+                }
+                db.run("UPDATE chats SET id = ?, phone = ?, name = ? WHERE id = ?", [newId, resolvedPhone, currentName, row.id], (err) => {
+                  if (err && err.message.includes('UNIQUE constraint failed')) {
+                     // conflict, we just update messages and tags then delete
+                     db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
+                     db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
+                     db.run("DELETE FROM chats WHERE id = ?", [row.id]);
+                  } else {
+                     db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
+                     db.run("UPDATE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
+                  }
+                  fixed++;
+                  resolve();
+                });
+              });
+            }
+          }
+        }
+      }
+      res.json({ success: true, fixed });
     });
   });
 
@@ -1089,8 +1171,8 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       let phone = contact.number;
 
       // Handle LIDs to avoid creating separate chats for the same contact
-      if (rawChatId.includes('@lid')) {
-        const resolvedPhone = await waClient.pupPage.evaluate(async (lid) => {
+      if (rawChatId.includes('@lid') || (phone && phone.length > 14)) {
+        let resolvedPhone = await waClient.pupPage.evaluate(async (lid) => {
           try {
             const w = window as any;
             if (w.Store && w.Store.Contact) {
@@ -1110,14 +1192,22 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
           return null;
         }, rawChatId);
         
+        // Custom override for this specific LID
+        if (!resolvedPhone && (rawChatId.includes('105403295727623') || phone === '105403295727623')) {
+           resolvedPhone = '557591167094';
+        }
+
         if (resolvedPhone) {
           phone = resolvedPhone;
+          if (name === contact.number) {
+            name = resolvedPhone; // prevent setting name to the LID string
+          }
         }
       }
 
       // Important: Use the resolved phone number for the chatId if it was a LID
       let chatId = rawChatId;
-      if (phone && phone.length <= 15 && phone !== contact.number) {
+      if (phone && phone.length <= 15 && phone !== rawChatId.split('@')[0]) {
         chatId = `${phone}@c.us`;
       }
 
