@@ -11,7 +11,6 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import archiver from 'archiver';
 import { GoogleGenAI } from '@google/genai';
 import axios from 'axios';
 
@@ -203,7 +202,7 @@ setInterval(() => {
     if (rows && rows.length > 0) {
       rows.forEach(async (row: any) => {
         try {
-          await waClient!.sendMessage('557591167094@c.us', `⏰ *LEMBRETE*\n\n${row.content}`);
+          await waClient!.sendMessage('557591167094@c.us', \`⏰ *LEMBRETE*\n\n\${row.content}\`);
           aiDb.run("UPDATE ai_memory SET is_triggered = 1 WHERE id = ?", [row.id]);
         } catch (e) {
           console.error('Error sending reminder:', e);
@@ -222,10 +221,10 @@ setInterval(() => {
     if (rows && rows.length > 0) {
       rows.forEach(async (row: any) => {
         try {
-          const chatId = `${row.phone}@c.us`;
+          const chatId = \`\${row.phone}@c.us\`;
           await waClient!.sendMessage(chatId, row.message);
           aiDb.run("UPDATE scheduled_messages SET is_triggered = 1 WHERE id = ?", [row.id]);
-          await waClient!.sendMessage('557591167094@c.us', `✅ *MENSAGEM AGENDADA ENVIADA*\n\nPara: ${row.phone}\nMensagem: ${row.message}`);
+          await waClient!.sendMessage('557591167094@c.us', \`✅ *MENSAGEM AGENDADA ENVIADA*\n\nPara: \${row.phone}\nMensagem: \${row.message}\`);
         } catch (e) {
           console.error('Error sending scheduled message:', e);
         }
@@ -245,14 +244,14 @@ setInterval(() => {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       
       const chats = await new Promise<any[]>((resolve, reject) => {
-        db.all(`
+        db.all(\`
           SELECT c.id, c.name, c.phone, c.last_message, c.last_message_time, c.unread_count, col.name as column_name, GROUP_CONCAT(t.name) as tags
           FROM chats c
           LEFT JOIN columns col ON c.column_id = col.id
           LEFT JOIN chat_tags ct ON c.id = ct.chat_id
           LEFT JOIN tags t ON ct.tag_id = t.id
           GROUP BY c.id
-        `, (err, rows) => {
+        \`, (err, rows) => {
           if (err) reject(err);
           else resolve(rows);
         });
@@ -266,20 +265,20 @@ setInterval(() => {
       });
 
       const recentMessages = await new Promise<any[]>((resolve, reject) => {
-        db.all(`
+        db.all(\`
           SELECT m.body, m.from_me, m.timestamp, c.name as chat_name
           FROM messages m
           JOIN chats c ON m.chat_id = c.id
           ORDER BY m.timestamp DESC
           LIMIT 100
-        `, (err, rows) => {
+        \`, (err, rows) => {
           if (err) reject(err);
           else resolve(rows);
         });
       });
 
-      const systemInstruction = `Você deve funcionar como um “copiloto” do dashboard.
-Data e hora atual: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
+      const systemInstruction = \`Você deve funcionar como um “copiloto” do dashboard.
+Data e hora atual: \${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
 
 ==================================================
 OBJETIVO PRINCIPAL
@@ -296,8 +295,8 @@ Você NÃO deve assumir que tem acesso direto ao banco.
 Você NÃO deve responder como se soubesse números, quantidades ou registros se eles não forem fornecidos pelo sistema.
 
 DADOS FORNECIDOS PELO SISTEMA NESTE MOMENTO:
-Tags existentes: ${JSON.stringify(tags)}
-Resumo dos Chats atuais: ${JSON.stringify(chats.map(c => ({
+Tags existentes: \${JSON.stringify(tags)}
+Resumo dos Chats atuais: \${JSON.stringify(chats.map(c => ({
   nome: c.name,
   telefone: c.phone,
   coluna: c.column_name,
@@ -305,7 +304,7 @@ Resumo dos Chats atuais: ${JSON.stringify(chats.map(c => ({
   ultima_mensagem: c.last_message,
   data_ultima_mensagem: new Date(c.last_message_time).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 })))}
-Últimas 100 mensagens (contexto recente): ${JSON.stringify(recentMessages.map(m => ({
+Últimas 100 mensagens (contexto recente): \${JSON.stringify(recentMessages.map(m => ({
   chat: m.chat_name,
   enviado_por_mim: m.from_me === 1,
   mensagem: m.body,
@@ -339,7 +338,7 @@ RESPOSTAS AUTOMÁTICAS: Você NÃO deve recomendar resposta automática livre pa
 ESTILO DE RESPOSTA: profissional, objetivo, claro, operacional, útil para ambiente de escritório contábil, sem floreios desnecessários. Quando precisar destacar uma palavra ou frase, utilize sempre negrito com dois asteriscos (exemplo: **palavra**). Não utilize apenas um asterisco para destaque.
 
 FORMATO DE SAÍDA:
-Se o pedido for para executar uma ação (enviar mensagem, criar tag, adicionar tag, agendar mensagem), você DEVE retornar APENAS um JSON no seguinte formato, sem formatação markdown (sem \`\`\`json):
+Se o pedido for para executar uma ação (enviar mensagem, criar tag, adicionar tag, agendar mensagem), você DEVE retornar APENAS um JSON no seguinte formato, sem formatação markdown (sem \\\`\\\`\\\`json):
 Para enviar mensagem: {"command": "SEND_MESSAGE", "params": {"phone": "5511999999999", "message": "Texto da mensagem"}}
 Para agendar o envio de uma mensagem: {"command": "SCHEDULE_MESSAGE", "params": {"phone": "5511999999999", "message": "Texto da mensagem", "trigger_at": "2026-05-10T09:00:00"}} (trigger_at é obrigatório e deve estar no formato ISO 8601)
 Para criar tag: {"command": "CREATE_TAG", "params": {"name": "Nome da Tag"}}
@@ -350,7 +349,7 @@ Se for pedido de análise de dados já fornecidos: RETORNE TEXTO CLARO E ÚTIL
 Se for pedido de sugestão de resposta: RETORNE SOMENTE A SUGESTÃO DE RESPOSTA
 Se for pedido de classificação: RETORNE JSON ESTRUTURADO
 
-REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilidade. Você não é um atendente do cliente final. Você é um copiloto interno do operador do sistema.`;
+REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilidade. Você não é um atendente do cliente final. Você é um copiloto interno do operador do sistema.\`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
@@ -376,9 +375,9 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
             if ((command === 'SEND_MESSAGE' || command === 'ENVIAR_MENSAGEM') && waClient && waStatus === 'connected') {
               const phone = params.phone || params.telefone;
               const msgText = params.message || params.mensagem;
-              const chatId = `${phone}@c.us`;
+              const chatId = \`\${phone}@c.us\`;
               await waClient.sendMessage(chatId, msgText);
-              replyText = `✅ Mensagem enviada para ${phone}:\n"${msgText}"`;
+              replyText = \`✅ Mensagem enviada para \${phone}:\n"\${msgText}"\`;
             } else if (command === 'SCHEDULE_MESSAGE' || command === 'AGENDAR_MENSAGEM') {
               const phone = params.phone || params.telefone;
               const msgText = params.message || params.mensagem;
@@ -395,19 +394,19 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
                 await new Promise((resolve) => {
                   aiDb.run("INSERT INTO scheduled_messages (phone, message, trigger_at, is_triggered, created_at) VALUES (?, ?, ?, ?, ?)", [phone, msgText, triggerAt, 0, Date.now()], resolve);
                 });
-                replyText = `✅ Mensagem agendada para ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\nPara: ${phone}\n"${msgText}"`;
+                replyText = \`✅ Mensagem agendada para \${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\nPara: \${phone}\n"\${msgText}"\`;
               } else {
-                replyText = `❌ Erro ao agendar mensagem. Verifique se o telefone, mensagem e data/hora estão corretos.`;
+                replyText = \`❌ Erro ao agendar mensagem. Verifique se o telefone, mensagem e data/hora estão corretos.\`;
               }
             } else if (command === 'CREATE_TAG' || command === 'CRIAR_TAG') {
               const tagName = params.name || params.nome;
-              const tagId = `tag-${Date.now()}`;
+              const tagId = \`tag-\${Date.now()}\`;
               const color = '#' + Math.floor(Math.random()*16777215).toString(16);
               await new Promise((resolve) => {
                 db.run("INSERT INTO tags (id, name, color) VALUES (?, ?, ?)", [tagId, tagName, color], resolve);
               });
               io.emit('tags_updated');
-              replyText = `✅ Tag "${tagName}" criada com sucesso.`;
+              replyText = \`✅ Tag "\${tagName}" criada com sucesso.\`;
             } else if (command === 'ADD_TAG') {
               const phone = params.phone || params.contact_phone;
               const tagName = params.tag_name || params.name;
@@ -418,19 +417,19 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               if (chat) {
                 // Find tag by name
                 const tag: any = await new Promise((resolve) => {
-                  db.get("SELECT id FROM tags WHERE name LIKE ?", [`%${tagName}%`], (err, row) => resolve(row));
+                  db.get("SELECT id FROM tags WHERE name LIKE ?", [\`%\${tagName}%\`], (err, row) => resolve(row));
                 });
                 if (tag) {
                   await new Promise((resolve) => {
                     db.run("INSERT OR IGNORE INTO chat_tags (chat_id, tag_id) VALUES (?, ?)", [chat.id, tag.id], resolve);
                   });
                   io.emit('chat_updated', { id: chat.id });
-                  replyText = `✅ Tag "${tagName}" adicionada ao contato.`;
+                  replyText = \`✅ Tag "\${tagName}" adicionada ao contato.\`;
                 } else {
-                  replyText = `❌ Tag "${tagName}" não encontrada.`;
+                  replyText = \`❌ Tag "\${tagName}" não encontrada.\`;
                 }
               } else {
-                replyText = `❌ Contato com telefone ${phone} não encontrado.`;
+                replyText = \`❌ Contato com telefone \${phone} não encontrado.\`;
               }
             } else if (command === 'ADD_MEMORY') {
               const content = params.content || params.conteudo;
@@ -448,13 +447,13 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               });
               
               if (triggerAt) {
-                replyText = `✅ Lembrete agendado para ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\n"${content}"`;
+                replyText = \`✅ Lembrete agendado para \${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\n"\${content}"\`;
               } else {
-                replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${content}"`;
+                replyText = \`✅ Lembrete/Tarefa adicionada à minha memória:\n"\${content}"\`;
               }
               
               if (waClient && waStatus === 'connected') {
-                await waClient.sendMessage('557591167094@c.us', `✅ Novo lembrete adicionado via Copiloto:\n"${content}"${triggerAt ? `\nAgendado para: ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}` : ''}`);
+                await waClient.sendMessage('557591167094@c.us', \`✅ Novo lembrete adicionado via Copiloto:\n"\${content}"\${triggerAt ? \`\nAgendado para: \${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}\` : ''}\`);
               }
             }
           }
@@ -522,14 +521,14 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
   });
 
   app.get('/api/chats', (req, res) => {
-    db.all(`
+    db.all(\`
       SELECT c.*, GROUP_CONCAT(t.id) as tag_ids
       FROM chats c
       LEFT JOIN chat_tags ct ON c.id = ct.chat_id
       LEFT JOIN tags t ON ct.tag_id = t.id
       GROUP BY c.id
       ORDER BY c.last_message_time DESC
-    `, (err, rows) => {
+    \`, (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
       const formattedRows = rows.map((r: any) => ({
         ...r,
@@ -563,261 +562,6 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       io.emit('chat_updated', { id: req.params.id, unread_count: 0 });
       res.json({ success: true });
     });
-  });
-
-  app.get('/api/test-contact/:id', async (req, res) => {
-    if (!waClient) return res.status(400).send('waClient not ready');
-    try {
-      const contactId = req.params.id; // provide full id like 5511999999999@c.us
-      const contact = await waClient.getContactById(contactId);
-      
-      const evalData = await waClient.pupPage.evaluate(async (id: string) => {
-          const w = window as any;
-          const c = w.Store.Contact.get(id);
-          return c ? Object.keys(c).reduce((acc, k) => {
-              if (typeof c[k] === 'string' || typeof c[k] === 'number' || typeof c[k] === 'boolean' || c[k] === null) {
-                  acc[k] = c[k];
-              } else if (c[k] && typeof c[k] === 'object' && c[k].user) { // check for wid
-                  acc[k] = c[k]._serialized || c[k];
-              }
-              return acc;
-          }, {} as any) : null;
-      }, contactId);
-
-      res.json({
-         nativeContact: contact,
-         evalData: evalData
-      });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-  app.post('/api/repair-names', async (req, res) => {
-    if (!waClient || waStatus !== 'connected') return res.status(400).json({ error: 'WhatsApp not connected' });
-
-    db.all("SELECT id, name, phone FROM chats", async (err, rows: any[]) => {
-      if (err) return res.status(500).json({ error: err.message });
-
-      let repaired = 0;
-      for (const row of rows) {
-        let currentId = row.id;
-
-        // Detect if this is a corrupted LID mapped to @c.us (e.g. 105403295727623@c.us has length 15 for the digits)
-        // or if it's a raw @lid
-        const isLid = currentId.includes('@lid');
-        const isCorruptedLid = currentId.endsWith('@c.us') && currentId.split('@')[0].length > 14;
-
-        // Migrate @lid or corrupted @c.us to actual phone number @c.us
-        if (isLid || isCorruptedLid) {
-           let realPhone = null;
-           
-           if (!isCorruptedLid) {
-               // Let's ask puppeteer for the real phone number of this LID
-               realPhone = await waClient.pupPage.evaluate(async (id: string) => {
-                   try {
-                       const w = window as any;
-                       const c = w.Store.Contact.get(id);
-                       if (c && c.phoneNumber) return c.phoneNumber.split('@')[0];
-                   } catch(e) {}
-                   return null;
-               }, currentId);
-           }
-           
-           // If puppeteer doesn't have it, try native fallback
-           if (!realPhone) {
-              try {
-                  // For corrupted lids, we might need to query the server or just find it by searching history...
-                  // Better: wait for a new message to create the correct chat
-              } catch(e) {}
-           }
-           
-           // If we still don't have it, and the row.phone exists and DOES NOT look like a LID (valid phone is ~12-13 digits)
-           if (!realPhone && row.phone && row.phone.length > 8 && row.phone.length <= 14) {
-               realPhone = row.phone;
-           }
-
-           if (realPhone) {
-               const newId = `${realPhone}@c.us`; 
-               
-               // If existing ID is exactly the new ID, nothing to migrate
-               if (currentId !== newId) {
-                   // Check if the target @c.us already exists
-                   const existingChat = await new Promise<any>((resolve) => {
-                      db.get("SELECT id, unread_count, last_message_time FROM chats WHERE id = ?", [newId], (err, r) => resolve(r));
-                   });
-
-                   if (!existingChat) {
-                       // Update chat ID and fix phone
-                       await new Promise<void>((resolve) => {
-                          db.run("UPDATE chats SET id = ?, phone = ? WHERE id = ?", [newId, realPhone, currentId], () => resolve());
-                       });
-                       // Update all messages
-                       await new Promise<void>((resolve) => {
-                          db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
-                       });
-                       // Update chat tags
-                       await new Promise<void>((resolve) => {
-                          db.run("UPDATE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
-                       });
-                       console.log(`Migrated ${currentId} to @c.us for ${realPhone}`);
-                       currentId = newId;
-                       io.emit('chat_deleted', { id: row.id }); // force UI to reload
-                   } else {
-                       // Merge! The @c.us chat already exists.
-                       console.log(`Merging ${currentId} into existing @c.us for ${realPhone}`);
-                       
-                       // Move messages ignoring duplicates by ID
-                       await new Promise<void>((resolve) => {
-                          db.run("UPDATE OR IGNORE messages SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
-                       });
-                       // Clean up any messages that failed to move (duplicates)
-                       await new Promise<void>((resolve) => {
-                          db.run("DELETE FROM messages WHERE chat_id = ?", [currentId], () => resolve());
-                       });
-                       
-                       // Move tags ignoring duplicates
-                       await new Promise<void>((resolve) => {
-                          db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, currentId], () => resolve());
-                       });
-                       await new Promise<void>((resolve) => {
-                          db.run("DELETE FROM chat_tags WHERE chat_id = ?", [currentId], () => resolve());
-                       });
-
-                       // Delete the old chat
-                       await new Promise<void>((resolve) => {
-                          db.run("DELETE FROM chats WHERE id = ?", [currentId], () => resolve());
-                       });
-                       
-                       currentId = newId;
-                       io.emit('chat_deleted', { id: row.id });
-                   }
-                   repaired++;
-               }
-           }
-        }
-
-        const isCorruptedLidData = (!row.name || row.name === currentId || row.name === row.phone || (row.name.length > 14 && /^\d+$/.test(row.name)));
-
-        if (isCorruptedLidData) {
-           const evalData = await waClient.pupPage.evaluate(async (id: string) => {
-              try {
-                 const w = window as any;
-                 const c = w.Store.Contact.get(id);
-                 return c ? (c.name || c.pushname) : null;
-              } catch(e) { return null; }
-           }, currentId);
-
-           if (evalData && evalData !== currentId && evalData !== row.phone) {
-             db.run("UPDATE chats SET name = ? WHERE id = ?", [evalData, currentId]);
-             io.emit('chat_updated', { id: currentId, name: evalData });
-             repaired++;
-           } else {
-             // Let's try native getContact
-             try {
-                const contact = await waClient.getContactById(currentId);
-                const nativeName = contact.name || contact.pushname;
-                if (nativeName && nativeName !== currentId && nativeName !== row.phone) {
-                   db.run("UPDATE chats SET name = ? WHERE id = ?", [nativeName, currentId]);
-                   io.emit('chat_updated', { id: currentId, name: nativeName });
-                   repaired++;
-                }
-             } catch (e) {}
-           }
-        }
-      }
-      res.json({ success: true, repaired });
-    });
-  });
-
-  app.get('/api/export', async (req, res) => {
-    try {
-      const getAll = (query: string): Promise<any[]> => new Promise((resolve, reject) => {
-        db.all(query, (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows);
-        });
-      });
-
-      const [columns, chats, tags, chat_tags, messages] = await Promise.all([
-        getAll("SELECT * FROM columns ORDER BY position ASC"),
-        getAll("SELECT * FROM chats"),
-        getAll("SELECT * FROM tags"),
-        getAll("SELECT * FROM chat_tags"),
-        getAll("SELECT * FROM messages")
-      ]);
-
-      const exportData = {
-        columns,
-        chats: chats.map(chat => {
-           // attach tags to chat as convenience
-           const thisChatTags = chat_tags.filter(ct => ct.chat_id === chat.id).map(ct => ct.tag_id);
-           return { ...chat, tag_ids: thisChatTags };
-        }),
-        tags,
-        messages
-      };
-
-      const promptText = `
-Você está recebendo uma exportação de dados do sistema "WhatsKanban".
-O objetivo desta exportação é facilitar a migração para o seu próximo sistema de CRM ou Kanban.
-
-No arquivo \`export_data.json\`, você encontrará os dados perfeitamente estruturados e formatados, extraídos das tabelas do banco de dados (também incluído como \`database.sqlite\`). Além disso, a pasta \`uploads/\` contém todos os arquivos e mídias do sistema.
-
-### Como a estrutura do \`export_data.json\` está mapeada e estruturada:
-
-1. **\`columns\`** (Status/Fases do Kanban):
-   - Campos: \`id\`, \`name\` (nome da coluna), \`color\`, \`position\`.
-   - Lógica: Defina seus status de funil usando estas colunas.
-
-2. **\`tags\`** (Etiquetas):
-   - Campos: \`id\`, \`name\`, \`color\`.
-   - Lógica: Crie tags/etiquetas para segmentar leads ou conversas no novo sistema.
-
-3. **\`chats\`** (Contatos / Clientes / Conversas):
-   - Campos: \`id\` (ID único do WhatsApp nativo), \`name\` (Nome do Contato), \`phone\` (Telefone), \`profile_pic\` (URL ou Base64), \`column_id\` (em qual status/coluna do funil ele está), \`unread_count\`, \`last_message\`, \`last_message_time\`.
-   - Extras Adicionados Para Facilitar a Migração: \`tag_ids\` (Array com as IDs das tags associadas ao contato).
-   - Lógica: Ao criar um Contato/Cliente, defina o \`status\` com base no \`column_id\` atrelado a este \`chat\`, e adicione ao contato suas \`tags\` correspondentes com base na array de \`tag_ids\`.
-
-4. **\`messages\`** (Histórico de Conversas de Cada Contato):
-   - Campos: \`id\`, \`chat_id\` (referência ao ID do contato), \`from_me\` (0 = recebida, 1 = enviada por nós), \`body\` (texto descritivo da mensagem), \`timestamp\`, \`media_url\` (caminho do anexo a partir da pasta /uploads, se existir), \`media_type\` (tipo MIME), \`media_name\` (nome do arquivo original).
-   - Lógica: Relacione todo este histórico para o contato equivalente via \`chat_id\`. Se houver "media_url", o arquivo pode ser lido na pasta \`uploads/\` do zip e restaurado na nova plataforma com base no "media_type" e "media_name".
-
-Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na inserção das suas próprias tabelas ou rotinas de migração (via API ou SQL INSERTs), respeitando os mesmos relacionamentos.
-`;
-
-      res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', 'attachment; filename="whatskanban_export.zip"');
-
-      const archive = archiver('zip', {
-        zlib: { level: 9 } // Sets the compression level.
-      });
-
-      archive.on('error', function(err) {
-        throw err;
-      });
-
-      archive.pipe(res);
-
-      archive.append(JSON.stringify(exportData, null, 2), { name: 'export_data.json' });
-      archive.append(promptText, { name: 'prompt.txt' });
-      
-      const dbPath = path.join(DATA_DIR, 'kanban.db');
-      if (fs.existsSync(dbPath)) {
-         archive.file(dbPath, { name: 'database.sqlite' });
-      }
-
-      if (fs.existsSync(MEDIA_DIR)) {
-          archive.directory(MEDIA_DIR, 'uploads');
-      }
-
-      await archive.finalize();
-
-    } catch (e: any) {
-      console.error('Export error:', e);
-      if (!res.headersSent) {
-          res.status(500).json({ error: e.message });
-      }
-    }
   });
 
   app.get('/api/tags', (req, res) => {
@@ -921,13 +665,13 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
   });
 
   app.get('/api/media', (req, res) => {
-    db.all(`
+    db.all(\`
       SELECT m.id, m.chat_id, m.media_url, m.media_type, m.media_name, m.timestamp, m.from_me, c.name as chat_name, c.phone as chat_phone
       FROM messages m
       JOIN chats c ON m.chat_id = c.id
       WHERE m.media_url IS NOT NULL
       ORDER BY m.timestamp DESC
-    `, (err, rows: any[]) => {
+    \`, (err, rows: any[]) => {
       if (err) return res.status(500).json({ error: err.message });
       
       const mediaFiles = rows.map(row => {
@@ -974,7 +718,7 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
           media.filename = file.originalname;
           sentMsg = await waClient.sendMessage(chatId, media, { caption: body });
           
-          mediaUrl = `/media/${file.filename}${ext}`;
+          mediaUrl = \`/media/\${file.filename}\${ext}\`;
           mediaType = file.mimetype;
           mediaName = file.originalname;
         } else {
@@ -1102,7 +846,7 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
       }, contactId);
       return url || null;
     } catch (err) {
-      console.error(`Error getting profile pic for ${contactId}:`, err);
+      console.error(\`Error getting profile pic for \${contactId}:\`, err);
       return null;
     }
   };
@@ -1118,15 +862,15 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
       });
 
       const safeId = chatId.replace(/[@.]/g, '_');
-      const filename = `profile_${safeId}.jpg`;
+      const filename = \`profile_\${safeId}.jpg\`;
       const filepath = path.join(MEDIA_DIR, filename);
 
       fs.writeFileSync(filepath, Buffer.from(response.data));
 
       // Append timestamp to break browser cache, so if the frontend retries a previously broken image, it receives a new URL to force reload.
-      return `/media/${filename}?t=${Date.now()}`;
+      return \`/media/\${filename}?t=\${Date.now()}\`;
     } catch (err) {
-      console.error(`Erro ao baixar foto de perfil (${chatId}):`, err);
+      console.error(\`Erro ao baixar foto de perfil (\${chatId}):\`, err);
       return null;
     }
   };
@@ -1147,86 +891,9 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
         // Ignore error for @lid contacts or other special contacts
       }
       
-      let profilePicUrl = null;
-      let contactObj = null;
-
-      try {
-        contactObj = await waClient.getContactById(chatId);
-      } catch (e) {}
-
-      // Try using the getProfilePicUrl from our getProfilePicUrl helper
-      profilePicUrl = await getProfilePicUrl(waClient, chatId);
-      
-      // If none of those worked, and we have a contact object
-      if (!profilePicUrl && contactObj) {
-         try {
-            profilePicUrl = await contactObj.getProfilePicUrl();
-         } catch (e) {}
-
-         // Try reading LID from the contact if accessible directly
-         if (!profilePicUrl) {
-            let lidToTry = null;
-            if ((contactObj as any).id?.server === 'lid') {
-               lidToTry = (contactObj as any).id._serialized;
-            } else {
-               // Ask puppeteer if this contact has a lid property hidden
-               lidToTry = await waClient.pupPage.evaluate(async (id: string) => {
-                   const w = window as any;
-                   if (w.Store && w.Store.Contact) {
-                       const c = w.Store.Contact.get(id);
-                       if (c && c.lidJid) return c.lidJid;
-                       if (c && c.lid) return c.lid;
-                   }
-                   return null;
-               }, chatId);
-            }
-
-            if (lidToTry) {
-               profilePicUrl = await getProfilePicUrl(waClient, lidToTry);
-            }
-         }
-      }
-
-      // Final fallback to WWebJS native method
+      let profilePicUrl = await getProfilePicUrl(waClient, chatId);
       if (!profilePicUrl) {
-         profilePicUrl = await waClient.getProfilePicUrl(chatId).catch(() => null);
-      }
-
-      // Also try to salvage a real name and LID picture from puppeteer context
-      let realNameFromEval: string | null = null;
-      
-      const evalData = await waClient.pupPage.evaluate(async (id: string) => {
-          try {
-             const w = window as any;
-             const c = w.Store.Contact.get(id);
-             let foundUrl = null;
-             let foundName = c ? (c.name || c.pushname || null) : null;
-             
-             // lid or lidJid
-             const lidStr = c && (c.lidJid || c.lid);
-             if (lidStr) {
-                const lidWid = typeof lidStr === 'string' ? w.Store.WidFactory.createWid(lidStr) : lidStr;
-                
-                if (w.Store.ProfilePic && w.Store.ProfilePic.profilePicFind) {
-                    const res = await w.Store.ProfilePic.profilePicFind(lidWid);
-                    if (res && res.eurl) foundUrl = res.eurl;
-                }
-                if (!foundUrl && w.Store.ProfilePic && w.Store.ProfilePic.requestProfilePicFromServer) {
-                    const res = await w.Store.ProfilePic.requestProfilePicFromServer(lidWid);
-                    if (res && res.eurl) foundUrl = res.eurl;
-                }
-             }
-             return { url: foundUrl, name: foundName };
-          } catch(e) {
-             return { url: null, name: null };
-          }
-      }, chatId);
-
-      if (!profilePicUrl && evalData && evalData.url) {
-         profilePicUrl = evalData.url;
-      }
-      if (evalData && evalData.name) {
-         realNameFromEval = evalData.name;
+        profilePicUrl = await waClient.getProfilePicUrl(chatId).catch(() => null);
       }
 
       let profilePic = null;
@@ -1235,36 +902,25 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
       }
 
       db.run(
-        "UPDATE chats SET profile_pic = ? WHERE id = ?",
-        [profilePic || null, chatId],
+        "UPDATE chats SET profile_pic = ?, name = ? WHERE id = ?",
+        [profilePic || null, name, chatId],
         (err) => {
           if (err) {
-            console.error(`Error updating chat info for ${chatId}:`, err);
+            console.error(\`Error updating chat info for \${chatId}:\`, err);
             return;
           }
 
           io.emit('chat_updated', {
             id: chatId,
+            name: name,
             profile_pic: profilePic || null
           });
         }
       );
 
-      // Attempt to repair names that got corrupted into IDs/numbers by previous bugs
-      db.get("SELECT name, phone FROM chats WHERE id = ?", [chatId], (err, row: any) => {
-         if (!err && row && (row.name === chatId || row.name === row.phone || !row.name)) {
-            const betterName = realNameFromEval || name;
-            if (betterName && betterName !== chatId && betterName !== row.phone && betterName !== '') {
-               db.run("UPDATE chats SET name = ? WHERE id = ?", [betterName, chatId], () => {
-                  io.emit('chat_updated', { id: chatId, name: betterName });
-               });
-            }
-         }
-      });
-
       return profilePic || null;
     } catch (error) {
-      console.error(`Error syncing chat info for ${chatId}:`, error);
+      console.error(\`Error syncing chat info for \${chatId}:\`, error);
       return null;
     }
   };
@@ -1332,11 +988,11 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
         try {
           if (fs.lstatSync(file)) {
             fs.unlinkSync(file);
-            console.log(`Removed lock file: ${file}`);
+            console.log(\`Removed lock file: \${file}\`);
           }
         } catch (err: any) {
           if (err.code !== 'ENOENT') {
-            console.error(`Error checking/removing ${file}:`, err);
+            console.error(\`Error checking/removing \${file}:\`, err);
           }
         }
       }
@@ -1413,45 +1069,10 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
       const chat = await msg.getChat();
       if (chat.isGroup) return; // Ignore groups for now
 
-      let rawChatId = chat.id._serialized;
-      let contact = await chat.getContact();
-      let name = contact.name || contact.pushname || contact.number;
-      let phone = contact.number;
-      let chatId = rawChatId;
-
-      // Ensure we use @c.us for the ID instead of @lid
-      if (rawChatId.includes('@lid')) {
-         // LIDs usually have long numeric strings for their 'number'. If it's too long, don't trust it.
-         if (!phone || phone.length > 14 || phone === rawChatId.split('@')[0]) {
-             const realPhone = await waClient.pupPage.evaluate(async (id: string) => {
-                 try {
-                     const w = window as any;
-                     const c = w.Store.Contact.get(id);
-                     if (c && c.phoneNumber) return c.phoneNumber.split('@')[0];
-                 } catch(e) {}
-                 return null;
-             }, rawChatId);
-             
-             if (realPhone) {
-                 phone = realPhone;
-             }
-         }
-         
-         if (phone && phone.length <= 14) {
-             chatId = `${phone}@c.us`; 
-             try {
-                 const cUsContact = await waClient.getContactById(chatId);
-                 if (cUsContact) {
-                     contact = cUsContact;
-                     name = contact.name || contact.pushname || contact.number || name;
-                 }
-             } catch(e) {}
-         } else {
-             // If we couldn't get a real phone, keep the rawChatId to avoid invalid @c.us creations
-             chatId = rawChatId;
-         }
-      }
-      
+      const chatId = chat.id._serialized;
+      const contact = await chat.getContact();
+      const name = contact.name || contact.pushname || contact.number;
+      const phone = contact.number;
       let body = msg.body;
       const timestamp = msg.timestamp * 1000;
       const fromMe = msg.fromMe ? 1 : 0;
@@ -1466,11 +1087,11 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
           const media = await msg.downloadMedia();
           if (media) {
             const ext = media.mimetype.split('/')[1].split(';')[0];
-            const filename = `${msg.id.id}.${ext}`;
+            const filename = \`\${msg.id.id}.\${ext}\`;
             const filepath = path.join(MEDIA_DIR, filename);
             fs.writeFileSync(filepath, Buffer.from(media.data, 'base64'));
             
-            mediaUrl = `/media/${filename}`;
+            mediaUrl = \`/media/\${filename}\`;
             mediaType = media.mimetype;
             mediaName = media.filename || filename;
 
@@ -1501,32 +1122,14 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
         }
       }
 
-      const displayBody = body || (mediaType ? `[Media: ${mediaType}]` : '');
+      const displayBody = body || (mediaType ? \`[Media: \${mediaType}]\` : '');
 
       let profilePic: string | null = null;
       try {
+        // Tenta buscar a foto atualizada
         let profilePicUrl = await getProfilePicUrl(waClient, chatId);
         
-        if (!profilePicUrl) {
-           let lidToTry = null;
-           if ((contact as any).id?.server === 'lid') {
-              lidToTry = (contact as any).id._serialized;
-           } else {
-              lidToTry = await waClient.pupPage.evaluate(async (id: string) => {
-                  const w = window as any;
-                  if (w.Store && w.Store.Contact) {
-                      const c = w.Store.Contact.get(id);
-                      if (c && c.lidJid) return c.lidJid;
-                      if (c && c.lid) return c.lid;
-                  }
-                  return null;
-              }, chatId);
-           }
-           if (lidToTry) {
-              profilePicUrl = await getProfilePicUrl(waClient, lidToTry);
-           }
-        }
-        
+        // Se falhar no Puppeteer, tenta o método nativo do waClient como backup
         if (!profilePicUrl) {
           profilePicUrl = await waClient.getProfilePicUrl(chatId).catch(() => null);
         }
@@ -1574,16 +1177,9 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
                 });
               }
               
-              let finalName = chatRow.name;
-              
-              // Only override existing name if the new name is better (i.e. not the phone number or ID)
-              if (name && name !== chatId && name !== phone && name !== '') {
-                finalName = name;
-              }
-
-              db.run(`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?, name = ?, last_message_from_me = ?${unreadUpdate} WHERE id = ?`,
-                [displayBody, timestamp, finalProfilePic, finalName, fromMe, chatId], () => {
-                  io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name: finalName, last_message_from_me: fromMe });
+              db.run(\`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?, name = ?, last_message_from_me = ?\${unreadUpdate} WHERE id = ?\`,
+                [displayBody, timestamp, finalProfilePic, name, fromMe, chatId], () => {
+                  io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name, last_message_from_me: fromMe });
                 });
             });
           }
@@ -1604,11 +1200,11 @@ Um desenvolvedor ou assistente de IA pode usar as tabelas acima como espelho na 
                   aiDb.all("SELECT * FROM ai_memory ORDER BY created_at DESC", (err, rows) => resolve(rows || []));
                 });
                 
-                const systemInstruction = `Você é o assistente pessoal do usuário. Você está conversando com ele pelo WhatsApp.
-Data e hora atual: ${new Date().toLocaleString('pt-BR')}
+                const systemInstruction = \`Você é o assistente pessoal do usuário. Você está conversando com ele pelo WhatsApp.
+Data e hora atual: \${new Date().toLocaleString('pt-BR')}
 
 Sua memória atual (tarefas, lembretes, base de conhecimento):
-${JSON.stringify(aiMemory)}
+\${JSON.stringify(aiMemory)}
 
 Se o usuário pedir para adicionar algo à sua memória, retorne APENAS o JSON:
 {"command": "ADD_MEMORY", "params": {"content": "O que deve ser lembrado", "trigger_at": "2026-05-10T09:00:00"}} (trigger_at é opcional, use formato ISO 8601 se o usuário pedir para ser lembrado em uma data/hora específica)
@@ -1619,7 +1215,7 @@ Se o usuário pedir para enviar uma mensagem para alguém, retorne APENAS o JSON
 Se o usuário pedir para agendar o envio de uma mensagem para alguém, retorne APENAS o JSON:
 {"command": "SCHEDULE_MESSAGE", "params": {"phone": "5511999999999", "message": "Texto da mensagem", "trigger_at": "2026-05-10T09:00:00"}} (trigger_at é obrigatório e deve estar no formato ISO 8601)
 
-Caso contrário, responda de forma natural, útil e prestativa.`;
+Caso contrário, responda de forma natural, útil e prestativa.\`;
 
                 const response = await ai.models.generateContent({
                   model: 'gemini-3-flash-preview',
@@ -1633,7 +1229,7 @@ Caso contrário, responda de forma natural, útil e prestativa.`;
                 
                 // Try to parse command
                 try {
-                  const cleanJson = replyText.replace(/```json/g, '').replace(/```/g, '').trim();
+                  const cleanJson = replyText.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
                   if (cleanJson.startsWith('{') && cleanJson.endsWith('}')) {
                     const cmd = JSON.parse(cleanJson);
                     if (cmd.command === 'ADD_MEMORY') {
@@ -1651,19 +1247,19 @@ Caso contrário, responda de forma natural, útil e prestativa.`;
                       });
                       
                       if (triggerAt) {
-                        replyText = `✅ Lembrete agendado para ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\n"${cmd.params.content}"`;
+                        replyText = \`✅ Lembrete agendado para \${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\n"\${cmd.params.content}"\`;
                       } else {
-                        replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${cmd.params.content}"`;
+                        replyText = \`✅ Lembrete/Tarefa adicionada à minha memória:\n"\${cmd.params.content}"\`;
                       }
                     } else if (cmd.command === 'SEND_MESSAGE') {
                       const phone = cmd.params.phone;
                       const msgText = cmd.params.message;
                       if (phone && msgText && waClient && waStatus === 'connected') {
-                        const targetChatId = `${phone}@c.us`;
+                        const targetChatId = \`\${phone}@c.us\`;
                         await waClient.sendMessage(targetChatId, msgText);
-                        replyText = `✅ Mensagem enviada para ${phone}:\n"${msgText}"`;
+                        replyText = \`✅ Mensagem enviada para \${phone}:\n"\${msgText}"\`;
                       } else {
-                        replyText = `❌ Erro ao enviar mensagem. Verifique se o telefone e a mensagem estão corretos.`;
+                        replyText = \`❌ Erro ao enviar mensagem. Verifique se o telefone e a mensagem estão corretos.\`;
                       }
                     } else if (cmd.command === 'SCHEDULE_MESSAGE') {
                       const phone = cmd.params.phone;
@@ -1681,9 +1277,9 @@ Caso contrário, responda de forma natural, útil e prestativa.`;
                         await new Promise((resolve) => {
                           aiDb.run("INSERT INTO scheduled_messages (phone, message, trigger_at, is_triggered, created_at) VALUES (?, ?, ?, ?, ?)", [phone, msgText, triggerAt, 0, Date.now()], resolve);
                         });
-                        replyText = `✅ Mensagem agendada para ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\nPara: ${phone}\n"${msgText}"`;
+                        replyText = \`✅ Mensagem agendada para \${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\nPara: \${phone}\n"\${msgText}"\`;
                       } else {
-                        replyText = `❌ Erro ao agendar mensagem. Verifique se o telefone, mensagem e data/hora estão corretos.`;
+                        replyText = \`❌ Erro ao agendar mensagem. Verifique se o telefone, mensagem e data/hora estão corretos.\`;
                       }
                     }
                   }
@@ -1757,7 +1353,7 @@ Caso contrário, responda de forma natural, útil e prestativa.`;
   }
 
   server.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(\`Server running on http://localhost:\${PORT}\`);
   });
 }
 
