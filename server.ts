@@ -948,8 +948,12 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       );
 
       return profilePic || null;
-    } catch (error) {
-      console.error(`Error syncing chat info for ${chatId}:`, error);
+    } catch (error: any) {
+      if (error && error.message && (error.message.includes('getChat') || error.message.includes('No LID for user') || error.message.includes('Cannot read properties of undefined'))) {
+        // Silly warning due to WhatsApp internal changes on non-existent chats, ignore silently
+      } else {
+        console.error(`Error syncing chat info for ${chatId}:`, error);
+      }
       return null;
     }
   };
