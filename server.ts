@@ -202,7 +202,7 @@ setInterval(() => {
     if (rows && rows.length > 0) {
       rows.forEach(async (row: any) => {
         try {
-          await waClient!.sendMessage('557591167094@c.us', \`⏰ *LEMBRETE*\n\n\${row.content}\`);
+          await waClient!.sendMessage('557591167094@c.us', `⏰ *LEMBRETE*\n\n${row.content}`);
           aiDb.run("UPDATE ai_memory SET is_triggered = 1 WHERE id = ?", [row.id]);
         } catch (e) {
           console.error('Error sending reminder:', e);
@@ -221,10 +221,10 @@ setInterval(() => {
     if (rows && rows.length > 0) {
       rows.forEach(async (row: any) => {
         try {
-          const chatId = \`\${row.phone}@c.us\`;
+          const chatId = `${row.phone}@c.us`;
           await waClient!.sendMessage(chatId, row.message);
           aiDb.run("UPDATE scheduled_messages SET is_triggered = 1 WHERE id = ?", [row.id]);
-          await waClient!.sendMessage('557591167094@c.us', \`✅ *MENSAGEM AGENDADA ENVIADA*\n\nPara: \${row.phone}\nMensagem: \${row.message}\`);
+          await waClient!.sendMessage('557591167094@c.us', `✅ *MENSAGEM AGENDADA ENVIADA*\n\nPara: ${row.phone}\nMensagem: ${row.message}`);
         } catch (e) {
           console.error('Error sending scheduled message:', e);
         }
@@ -244,14 +244,14 @@ setInterval(() => {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       
       const chats = await new Promise<any[]>((resolve, reject) => {
-        db.all(\`
+        db.all(`
           SELECT c.id, c.name, c.phone, c.last_message, c.last_message_time, c.unread_count, col.name as column_name, GROUP_CONCAT(t.name) as tags
           FROM chats c
           LEFT JOIN columns col ON c.column_id = col.id
           LEFT JOIN chat_tags ct ON c.id = ct.chat_id
           LEFT JOIN tags t ON ct.tag_id = t.id
           GROUP BY c.id
-        \`, (err, rows) => {
+        `, (err, rows) => {
           if (err) reject(err);
           else resolve(rows);
         });
@@ -265,20 +265,20 @@ setInterval(() => {
       });
 
       const recentMessages = await new Promise<any[]>((resolve, reject) => {
-        db.all(\`
+        db.all(`
           SELECT m.body, m.from_me, m.timestamp, c.name as chat_name
           FROM messages m
           JOIN chats c ON m.chat_id = c.id
           ORDER BY m.timestamp DESC
           LIMIT 100
-        \`, (err, rows) => {
+        `, (err, rows) => {
           if (err) reject(err);
           else resolve(rows);
         });
       });
 
-      const systemInstruction = \`Você deve funcionar como um “copiloto” do dashboard.
-Data e hora atual: \${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
+      const systemInstruction = `Você deve funcionar como um “copiloto” do dashboard.
+Data e hora atual: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
 
 ==================================================
 OBJETIVO PRINCIPAL
@@ -295,8 +295,8 @@ Você NÃO deve assumir que tem acesso direto ao banco.
 Você NÃO deve responder como se soubesse números, quantidades ou registros se eles não forem fornecidos pelo sistema.
 
 DADOS FORNECIDOS PELO SISTEMA NESTE MOMENTO:
-Tags existentes: \${JSON.stringify(tags)}
-Resumo dos Chats atuais: \${JSON.stringify(chats.map(c => ({
+Tags existentes: ${JSON.stringify(tags)}
+Resumo dos Chats atuais: ${JSON.stringify(chats.map(c => ({
   nome: c.name,
   telefone: c.phone,
   coluna: c.column_name,
@@ -304,7 +304,7 @@ Resumo dos Chats atuais: \${JSON.stringify(chats.map(c => ({
   ultima_mensagem: c.last_message,
   data_ultima_mensagem: new Date(c.last_message_time).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 })))}
-Últimas 100 mensagens (contexto recente): \${JSON.stringify(recentMessages.map(m => ({
+Últimas 100 mensagens (contexto recente): ${JSON.stringify(recentMessages.map(m => ({
   chat: m.chat_name,
   enviado_por_mim: m.from_me === 1,
   mensagem: m.body,
@@ -338,7 +338,7 @@ RESPOSTAS AUTOMÁTICAS: Você NÃO deve recomendar resposta automática livre pa
 ESTILO DE RESPOSTA: profissional, objetivo, claro, operacional, útil para ambiente de escritório contábil, sem floreios desnecessários. Quando precisar destacar uma palavra ou frase, utilize sempre negrito com dois asteriscos (exemplo: **palavra**). Não utilize apenas um asterisco para destaque.
 
 FORMATO DE SAÍDA:
-Se o pedido for para executar uma ação (enviar mensagem, criar tag, adicionar tag, agendar mensagem), você DEVE retornar APENAS um JSON no seguinte formato, sem formatação markdown (sem \\\`\\\`\\\`json):
+Se o pedido for para executar uma ação (enviar mensagem, criar tag, adicionar tag, agendar mensagem), você DEVE retornar APENAS um JSON no seguinte formato, sem formatação markdown (sem \`\`\`json):
 Para enviar mensagem: {"command": "SEND_MESSAGE", "params": {"phone": "5511999999999", "message": "Texto da mensagem"}}
 Para agendar o envio de uma mensagem: {"command": "SCHEDULE_MESSAGE", "params": {"phone": "5511999999999", "message": "Texto da mensagem", "trigger_at": "2026-05-10T09:00:00"}} (trigger_at é obrigatório e deve estar no formato ISO 8601)
 Para criar tag: {"command": "CREATE_TAG", "params": {"name": "Nome da Tag"}}
@@ -349,7 +349,7 @@ Se for pedido de análise de dados já fornecidos: RETORNE TEXTO CLARO E ÚTIL
 Se for pedido de sugestão de resposta: RETORNE SOMENTE A SUGESTÃO DE RESPOSTA
 Se for pedido de classificação: RETORNE JSON ESTRUTURADO
 
-REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilidade. Você não é um atendente do cliente final. Você é um copiloto interno do operador do sistema.\`;
+REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilidade. Você não é um atendente do cliente final. Você é um copiloto interno do operador do sistema.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
@@ -375,9 +375,9 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
             if ((command === 'SEND_MESSAGE' || command === 'ENVIAR_MENSAGEM') && waClient && waStatus === 'connected') {
               const phone = params.phone || params.telefone;
               const msgText = params.message || params.mensagem;
-              const chatId = \`\${phone}@c.us\`;
+              const chatId = `${phone}@c.us`;
               await waClient.sendMessage(chatId, msgText);
-              replyText = \`✅ Mensagem enviada para \${phone}:\n"\${msgText}"\`;
+              replyText = `✅ Mensagem enviada para ${phone}:\n"${msgText}"`;
             } else if (command === 'SCHEDULE_MESSAGE' || command === 'AGENDAR_MENSAGEM') {
               const phone = params.phone || params.telefone;
               const msgText = params.message || params.mensagem;
@@ -394,19 +394,19 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
                 await new Promise((resolve) => {
                   aiDb.run("INSERT INTO scheduled_messages (phone, message, trigger_at, is_triggered, created_at) VALUES (?, ?, ?, ?, ?)", [phone, msgText, triggerAt, 0, Date.now()], resolve);
                 });
-                replyText = \`✅ Mensagem agendada para \${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\nPara: \${phone}\n"\${msgText}"\`;
+                replyText = `✅ Mensagem agendada para ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\nPara: ${phone}\n"${msgText}"`;
               } else {
-                replyText = \`❌ Erro ao agendar mensagem. Verifique se o telefone, mensagem e data/hora estão corretos.\`;
+                replyText = `❌ Erro ao agendar mensagem. Verifique se o telefone, mensagem e data/hora estão corretos.`;
               }
             } else if (command === 'CREATE_TAG' || command === 'CRIAR_TAG') {
               const tagName = params.name || params.nome;
-              const tagId = \`tag-\${Date.now()}\`;
+              const tagId = `tag-${Date.now()}`;
               const color = '#' + Math.floor(Math.random()*16777215).toString(16);
               await new Promise((resolve) => {
                 db.run("INSERT INTO tags (id, name, color) VALUES (?, ?, ?)", [tagId, tagName, color], resolve);
               });
               io.emit('tags_updated');
-              replyText = \`✅ Tag "\${tagName}" criada com sucesso.\`;
+              replyText = `✅ Tag "${tagName}" criada com sucesso.`;
             } else if (command === 'ADD_TAG') {
               const phone = params.phone || params.contact_phone;
               const tagName = params.tag_name || params.name;
@@ -417,19 +417,19 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               if (chat) {
                 // Find tag by name
                 const tag: any = await new Promise((resolve) => {
-                  db.get("SELECT id FROM tags WHERE name LIKE ?", [\`%\${tagName}%\`], (err, row) => resolve(row));
+                  db.get("SELECT id FROM tags WHERE name LIKE ?", [`%${tagName}%`], (err, row) => resolve(row));
                 });
                 if (tag) {
                   await new Promise((resolve) => {
                     db.run("INSERT OR IGNORE INTO chat_tags (chat_id, tag_id) VALUES (?, ?)", [chat.id, tag.id], resolve);
                   });
                   io.emit('chat_updated', { id: chat.id });
-                  replyText = \`✅ Tag "\${tagName}" adicionada ao contato.\`;
+                  replyText = `✅ Tag "${tagName}" adicionada ao contato.`;
                 } else {
-                  replyText = \`❌ Tag "\${tagName}" não encontrada.\`;
+                  replyText = `❌ Tag "${tagName}" não encontrada.`;
                 }
               } else {
-                replyText = \`❌ Contato com telefone \${phone} não encontrado.\`;
+                replyText = `❌ Contato com telefone ${phone} não encontrado.`;
               }
             } else if (command === 'ADD_MEMORY') {
               const content = params.content || params.conteudo;
@@ -447,13 +447,13 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               });
               
               if (triggerAt) {
-                replyText = \`✅ Lembrete agendado para \${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\n"\${content}"\`;
+                replyText = `✅ Lembrete agendado para ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\n"${content}"`;
               } else {
-                replyText = \`✅ Lembrete/Tarefa adicionada à minha memória:\n"\${content}"\`;
+                replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${content}"`;
               }
               
               if (waClient && waStatus === 'connected') {
-                await waClient.sendMessage('557591167094@c.us', \`✅ Novo lembrete adicionado via Copiloto:\n"\${content}"\${triggerAt ? \`\nAgendado para: \${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}\` : ''}\`);
+                await waClient.sendMessage('557591167094@c.us', `✅ Novo lembrete adicionado via Copiloto:\n"${content}"${triggerAt ? `\nAgendado para: ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}` : ''}`);
               }
             }
           }
@@ -521,14 +521,14 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
   });
 
   app.get('/api/chats', (req, res) => {
-    db.all(\`
+    db.all(`
       SELECT c.*, GROUP_CONCAT(t.id) as tag_ids
       FROM chats c
       LEFT JOIN chat_tags ct ON c.id = ct.chat_id
       LEFT JOIN tags t ON ct.tag_id = t.id
       GROUP BY c.id
       ORDER BY c.last_message_time DESC
-    \`, (err, rows) => {
+    `, (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
       const formattedRows = rows.map((r: any) => ({
         ...r,
@@ -665,13 +665,13 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
   });
 
   app.get('/api/media', (req, res) => {
-    db.all(\`
+    db.all(`
       SELECT m.id, m.chat_id, m.media_url, m.media_type, m.media_name, m.timestamp, m.from_me, c.name as chat_name, c.phone as chat_phone
       FROM messages m
       JOIN chats c ON m.chat_id = c.id
       WHERE m.media_url IS NOT NULL
       ORDER BY m.timestamp DESC
-    \`, (err, rows: any[]) => {
+    `, (err, rows: any[]) => {
       if (err) return res.status(500).json({ error: err.message });
       
       const mediaFiles = rows.map(row => {
@@ -718,7 +718,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
           media.filename = file.originalname;
           sentMsg = await waClient.sendMessage(chatId, media, { caption: body });
           
-          mediaUrl = \`/media/\${file.filename}\${ext}\`;
+          mediaUrl = `/media/${file.filename}${ext}`;
           mediaType = file.mimetype;
           mediaName = file.originalname;
         } else {
@@ -846,7 +846,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       }, contactId);
       return url || null;
     } catch (err) {
-      console.error(\`Error getting profile pic for \${contactId}:\`, err);
+      console.error(`Error getting profile pic for ${contactId}:`, err);
       return null;
     }
   };
@@ -862,15 +862,15 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       });
 
       const safeId = chatId.replace(/[@.]/g, '_');
-      const filename = \`profile_\${safeId}.jpg\`;
+      const filename = `profile_${safeId}.jpg`;
       const filepath = path.join(MEDIA_DIR, filename);
 
       fs.writeFileSync(filepath, Buffer.from(response.data));
 
       // Append timestamp to break browser cache, so if the frontend retries a previously broken image, it receives a new URL to force reload.
-      return \`/media/\${filename}?t=\${Date.now()}\`;
+      return `/media/${filename}?t=${Date.now()}`;
     } catch (err) {
-      console.error(\`Erro ao baixar foto de perfil (\${chatId}):\`, err);
+      console.error(`Erro ao baixar foto de perfil (${chatId}):`, err);
       return null;
     }
   };
@@ -906,7 +906,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         [profilePic || null, name, chatId],
         (err) => {
           if (err) {
-            console.error(\`Error updating chat info for \${chatId}:\`, err);
+            console.error(`Error updating chat info for ${chatId}:`, err);
             return;
           }
 
@@ -920,7 +920,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
       return profilePic || null;
     } catch (error) {
-      console.error(\`Error syncing chat info for \${chatId}:\`, error);
+      console.error(`Error syncing chat info for ${chatId}:`, error);
       return null;
     }
   };
@@ -988,11 +988,11 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         try {
           if (fs.lstatSync(file)) {
             fs.unlinkSync(file);
-            console.log(\`Removed lock file: \${file}\`);
+            console.log(`Removed lock file: ${file}`);
           }
         } catch (err: any) {
           if (err.code !== 'ENOENT') {
-            console.error(\`Error checking/removing \${file}:\`, err);
+            console.error(`Error checking/removing ${file}:`, err);
           }
         }
       }
@@ -1087,11 +1087,11 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
           const media = await msg.downloadMedia();
           if (media) {
             const ext = media.mimetype.split('/')[1].split(';')[0];
-            const filename = \`\${msg.id.id}.\${ext}\`;
+            const filename = `${msg.id.id}.${ext}`;
             const filepath = path.join(MEDIA_DIR, filename);
             fs.writeFileSync(filepath, Buffer.from(media.data, 'base64'));
             
-            mediaUrl = \`/media/\${filename}\`;
+            mediaUrl = `/media/${filename}`;
             mediaType = media.mimetype;
             mediaName = media.filename || filename;
 
@@ -1122,7 +1122,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         }
       }
 
-      const displayBody = body || (mediaType ? \`[Media: \${mediaType}]\` : '');
+      const displayBody = body || (mediaType ? `[Media: ${mediaType}]` : '');
 
       let profilePic: string | null = null;
       try {
@@ -1177,7 +1177,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
                 });
               }
               
-              db.run(\`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?, name = ?, last_message_from_me = ?\${unreadUpdate} WHERE id = ?\`,
+              db.run(`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?, name = ?, last_message_from_me = ?${unreadUpdate} WHERE id = ?`,
                 [displayBody, timestamp, finalProfilePic, name, fromMe, chatId], () => {
                   io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name, last_message_from_me: fromMe });
                 });
@@ -1200,11 +1200,11 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
                   aiDb.all("SELECT * FROM ai_memory ORDER BY created_at DESC", (err, rows) => resolve(rows || []));
                 });
                 
-                const systemInstruction = \`Você é o assistente pessoal do usuário. Você está conversando com ele pelo WhatsApp.
-Data e hora atual: \${new Date().toLocaleString('pt-BR')}
+                const systemInstruction = `Você é o assistente pessoal do usuário. Você está conversando com ele pelo WhatsApp.
+Data e hora atual: ${new Date().toLocaleString('pt-BR')}
 
 Sua memória atual (tarefas, lembretes, base de conhecimento):
-\${JSON.stringify(aiMemory)}
+${JSON.stringify(aiMemory)}
 
 Se o usuário pedir para adicionar algo à sua memória, retorne APENAS o JSON:
 {"command": "ADD_MEMORY", "params": {"content": "O que deve ser lembrado", "trigger_at": "2026-05-10T09:00:00"}} (trigger_at é opcional, use formato ISO 8601 se o usuário pedir para ser lembrado em uma data/hora específica)
@@ -1215,7 +1215,7 @@ Se o usuário pedir para enviar uma mensagem para alguém, retorne APENAS o JSON
 Se o usuário pedir para agendar o envio de uma mensagem para alguém, retorne APENAS o JSON:
 {"command": "SCHEDULE_MESSAGE", "params": {"phone": "5511999999999", "message": "Texto da mensagem", "trigger_at": "2026-05-10T09:00:00"}} (trigger_at é obrigatório e deve estar no formato ISO 8601)
 
-Caso contrário, responda de forma natural, útil e prestativa.\`;
+Caso contrário, responda de forma natural, útil e prestativa.`;
 
                 const response = await ai.models.generateContent({
                   model: 'gemini-3-flash-preview',
@@ -1229,7 +1229,7 @@ Caso contrário, responda de forma natural, útil e prestativa.\`;
                 
                 // Try to parse command
                 try {
-                  const cleanJson = replyText.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
+                  const cleanJson = replyText.replace(/```json/g, '').replace(/```/g, '').trim();
                   if (cleanJson.startsWith('{') && cleanJson.endsWith('}')) {
                     const cmd = JSON.parse(cleanJson);
                     if (cmd.command === 'ADD_MEMORY') {
@@ -1247,19 +1247,19 @@ Caso contrário, responda de forma natural, útil e prestativa.\`;
                       });
                       
                       if (triggerAt) {
-                        replyText = \`✅ Lembrete agendado para \${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\n"\${cmd.params.content}"\`;
+                        replyText = `✅ Lembrete agendado para ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\n"${cmd.params.content}"`;
                       } else {
-                        replyText = \`✅ Lembrete/Tarefa adicionada à minha memória:\n"\${cmd.params.content}"\`;
+                        replyText = `✅ Lembrete/Tarefa adicionada à minha memória:\n"${cmd.params.content}"`;
                       }
                     } else if (cmd.command === 'SEND_MESSAGE') {
                       const phone = cmd.params.phone;
                       const msgText = cmd.params.message;
                       if (phone && msgText && waClient && waStatus === 'connected') {
-                        const targetChatId = \`\${phone}@c.us\`;
+                        const targetChatId = `${phone}@c.us`;
                         await waClient.sendMessage(targetChatId, msgText);
-                        replyText = \`✅ Mensagem enviada para \${phone}:\n"\${msgText}"\`;
+                        replyText = `✅ Mensagem enviada para ${phone}:\n"${msgText}"`;
                       } else {
-                        replyText = \`❌ Erro ao enviar mensagem. Verifique se o telefone e a mensagem estão corretos.\`;
+                        replyText = `❌ Erro ao enviar mensagem. Verifique se o telefone e a mensagem estão corretos.`;
                       }
                     } else if (cmd.command === 'SCHEDULE_MESSAGE') {
                       const phone = cmd.params.phone;
@@ -1277,9 +1277,9 @@ Caso contrário, responda de forma natural, útil e prestativa.\`;
                         await new Promise((resolve) => {
                           aiDb.run("INSERT INTO scheduled_messages (phone, message, trigger_at, is_triggered, created_at) VALUES (?, ?, ?, ?, ?)", [phone, msgText, triggerAt, 0, Date.now()], resolve);
                         });
-                        replyText = \`✅ Mensagem agendada para \${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\nPara: \${phone}\n"\${msgText}"\`;
+                        replyText = `✅ Mensagem agendada para ${new Date(triggerAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}:\nPara: ${phone}\n"${msgText}"`;
                       } else {
-                        replyText = \`❌ Erro ao agendar mensagem. Verifique se o telefone, mensagem e data/hora estão corretos.\`;
+                        replyText = `❌ Erro ao agendar mensagem. Verifique se o telefone, mensagem e data/hora estão corretos.`;
                       }
                     }
                   }
@@ -1353,7 +1353,7 @@ Caso contrário, responda de forma natural, útil e prestativa.\`;
   }
 
   server.listen(PORT, "0.0.0.0", () => {
-    console.log(\`Server running on http://localhost:\${PORT}\`);
+    console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
