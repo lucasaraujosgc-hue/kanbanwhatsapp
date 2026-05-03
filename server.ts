@@ -1175,105 +1175,27 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       const chat = await msg.getChat();
       if (chat.isGroup) return; // Ignore groups for now
 
-      let rawChatId = chat.id._serialized;
+      // Usa msg.from / msg.to para obter o JID real (@c.us), evitando o @lid
+      // msg.from = quem enviou, msg.to = destinatário
+      // Para mensagens recebidas: msg.from = contato@c.us
+      // Para mensagens enviadas (fromMe): msg.to = contato@c.us
+      const fromMeEarly = msg.fromMe;
+      const remoteJid: string = fromMeEarly
+        ? (msg as any).to || (msg as any).id?.remote?._serialized || chat.id._serialized
+        : (msg as any).from || (msg as any).id?.remote?._serialized || chat.id._serialized;
+
+      // Se o remoteJid já vier como @c.us, usa direto; senão cai no chat.id
+      const resolvedJid = remoteJid.includes('@c.us') ? remoteJid : chat.id._serialized;
+
+      let chatId = resolvedJid;
+      let phone = chatId.split('@')[0];
+
       let contact = await chat.getContact();
-      let name = (contact as any).verifiedName || contact.name || contact.pushname || contact.number;
-      let phone = contact.number;
-      let chatId = rawChatId;
+      let name = (contact as any).verifiedName || contact.name || contact.pushname || phone;
 
-      // Resolução de LID: quando o chatId ou phone não é um número real de telefone,
-      // tenta múltiplas estratégias para obter o número real @c.us.
-      const phonePareceLid = !phone || phone.length > 13 || !/^[1-9]\d{7,13}$/.test(phone);
-      if (rawChatId.includes('@lid') || phonePareceLid) {
-        const lidJid = rawChatId.includes('@lid') ? rawChatId : `${phone}@lid`;
-
-        const resolvedInfo = await waClient.pupPage.evaluate(async (lidJid) => {
-          try {
-            const w = window as any;
-
-            // Estratégia 1: UserUtils / getUserInfo para converter lid -> jid real
-            if (w.Store && w.Store.UserUtils) {
-              try {
-                const wid = { user: lidJid.split('@')[0], server: 'lid' };
-                const info = await w.Store.UserUtils.getUserInfo([wid]);
-                if (info && info[0] && info[0].jid) {
-                  const realJid = info[0].jid;
-                  const realPhone = realJid.split('@')[0];
-                  return { phone: realPhone, name: info[0].verifiedName || info[0].name || null };
-                }
-              } catch(e) {}
-            }
-
-            // Estratégia 2: BusinessUtils
-            if (w.Store && w.Store.BusinessUtils) {
-              try {
-                const result = await w.Store.BusinessUtils.getPhoneFromLid(lidJid);
-                if (result && result.phone) return { phone: result.phone, name: null };
-              } catch(e) {}
-            }
-
-            // Estratégia 3: LidUtils / LidStore
-            if (w.Store && (w.Store.LidUtils || w.Store.LidStore)) {
-              try {
-                const utils = w.Store.LidUtils || w.Store.LidStore;
-                const result = await utils.resolvePhoneFromLid(lidJid);
-                if (result) return { phone: String(result).replace(/[^0-9]/g, ''), name: null };
-              } catch(e) {}
-            }
-
-            // Estratégia 4: Contact.getModelsArray com múltiplos critérios
-            if (w.Store && w.Store.Contact) {
-              const all = w.Store.Contact.getModelsArray();
-              const lidUser = lidJid.split('@')[0];
-
-              // 4a: lidJid field match
-              const byLidJid = all.find((c: any) =>
-                c.id && c.id.server === 'c.us' && c.lidJid &&
-                c.lidJid.split('@')[0] === lidUser
-              );
-              if (byLidJid) return { phone: byLidJid.id.user, name: byLidJid.verifiedName || byLidJid.name || byLidJid.pushname };
-
-              // 4b: lid field match
-              const byLid = all.find((c: any) =>
-                c.id && c.id.server === 'c.us' && c.lid &&
-                String(c.lid).split('@')[0] === lidUser
-              );
-              if (byLid) return { phone: byLid.id.user, name: byLid.verifiedName || byLid.name || byLid.pushname };
-
-              // 4c: phoneNumber no contato @lid
-              const lidEntry = w.Store.Contact.get(lidJid);
-              if (lidEntry && lidEntry.phoneNumber) {
-                return { phone: lidEntry.phoneNumber.replace(/[^0-9]/g, ''), name: lidEntry.verifiedName || lidEntry.name || lidEntry.pushname };
-              }
-            }
-
-            // Estratégia 5: chamar API interna de query de contato por lid
-            if (w.Store && w.Store.QueryExist) {
-              try {
-                const result = await w.Store.QueryExist(`${lidJid.split('@')[0]}@lid`);
-                if (result && result.jid) {
-                  return { phone: result.jid.split('@')[0], name: null };
-                }
-              } catch(e) {}
-            }
-
-          } catch(e) { console.error('[LID pupPage error]', e); }
-          return { phone: null, name: null };
-        }, lidJid);
-
-        if (resolvedInfo && resolvedInfo.phone && resolvedInfo.phone.length <= 13) {
-          phone = resolvedInfo.phone;
-          chatId = `${phone}@c.us`;
-          if (resolvedInfo.name) name = resolvedInfo.name;
-          else if (!name || phonePareceLid) name = phone;
-        } else {
-          // Último recurso: loga todas as keys do Store para diagnóstico
-          const storeKeys = await waClient.pupPage.evaluate(() => {
-            try { return Object.keys((window as any).Store || {}); } catch(e) { return []; }
-          });
-          console.warn(`[LID] Não resolvido: lidJid=${lidJid}, phone=${phone}`);
-          console.warn(`[LID] Store keys disponíveis: ${storeKeys.join(', ')}`);
-        }
+      // Se ainda assim phone parece LID (14+ dígitos), loga para diagnóstico
+      if (phone.length > 13) {
+        console.warn(`[LID] Não resolvido via msg.from/to: chatId=${chatId}, remoteJid=${remoteJid}, from=${(msg as any).from}, to=${(msg as any).to}`);
       }
 
       let body = msg.body;
