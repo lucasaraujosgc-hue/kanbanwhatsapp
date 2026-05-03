@@ -129,21 +129,6 @@ db.serialize(() => {
   db.run(`ALTER TABLE messages ADD COLUMN media_name TEXT`, (err) => { /* ignore */ });
   db.run(`ALTER TABLE messages ADD COLUMN transcription TEXT`, (err) => { /* ignore */ });
 
-  // Hotfix migration for LIDs to correct the specific missing contact
-  // Hotfix migration for LIDs to correct the specific missing contact
-  // We use INSERT OR REPLACE for chats and then delete the old one to avoid UNIQUE constraint failed if the c.us chat already exists.
-  db.get("SELECT id FROM chats WHERE id = '557591167094@c.us'", (err, existing: any) => {
-    if (!existing) {
-      db.get("SELECT * FROM chats WHERE id LIKE '%105403295727623%'", (err, row: any) => {
-        if (row) {
-          db.run("UPDATE chats SET id = '557591167094@c.us', phone = '557591167094' WHERE id = ?", [row.id]);
-          db.run("UPDATE messages SET chat_id = '557591167094@c.us' WHERE chat_id = ?", [row.id]);
-          db.run("UPDATE OR IGNORE chat_tags SET chat_id = '557591167094@c.us' WHERE chat_id = ?", [row.id]);
-        }
-      });
-    }
-  });
-
   // Hotfix delete 0@c.us (corrupted or dummy chat)
   db.run("DELETE FROM messages WHERE chat_id = '0@c.us'");
   db.run("DELETE FROM chat_tags WHERE chat_id = '0@c.us'");
@@ -1198,9 +1183,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
           if (name === contact.number) {
             name = phone; // Ensure name is at least the correct phone
           }
-        //} else {
-          //phone = ''; // Do not save LID as phone
-        //}
+        }
       }
 
       let body = msg.body;
