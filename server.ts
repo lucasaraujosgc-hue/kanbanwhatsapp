@@ -1181,6 +1181,9 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       let phone = contact.number;
       let chatId = rawChatId;
 
+      // Resolução de LID: quando o chatId ou phone não é um número real de telefone,
+      // busca o número real via Store.Contact no Puppeteer.
+      // LIDs numéricos têm 14+ dígitos; números BR reais têm no máximo 13 (55+DDD+9dig).
       const phonePareceLid = !phone || phone.length > 13 || !/^[1-9]\d{7,13}$/.test(phone);
       if (rawChatId.includes('@lid') || phonePareceLid) {
         const resolvedInfo = await waClient.pupPage.evaluate(async (lidJid, numericLid) => {
@@ -1190,52 +1193,76 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               const all = w.Store.Contact.getModelsArray();
 
               // Estratégia 1: busca pelo lidJid (quando rawChatId é @lid)
-              const real = all.find((c: any) => c.id && c.id.server === 'c.us' && c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]);
-              if (real && real.id && real.id.user) {
-                return { phone: real.id.user, name: real.verifiedName || real.name || real.pushname || real.displayName };
+              const byLid = all.find((c: any) =>
+                c.id && c.id.server === 'c.us' &&
+                c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]
+              );
+              if (byLid && byLid.id && byLid.id.user) {
+                return { phone: byLid.id.user, name: byLid.verifiedName || byLid.name || byLid.pushname || byLid.displayName };
               }
 
               // Estratégia 2: busca pelo número LID numérico no campo id.user ou lidJid
               if (numericLid) {
-                const byNumeric = all.find((c: any) =>
+                // Primeiro: acha o contato cujo id.user é o LID numérico
+                const lidEntry = all.find((c: any) =>
                   (c.id && c.id.user === numericLid) ||
                   (c.lidJid && c.lidJid.split('@')[0] === numericLid)
                 );
-                if (byNumeric) {
-                  const linkedReal = all.find((c: any) => c.id && c.id.server === 'c.us' && c.lidJid && c.lidJid.split('@')[0] === (byNumeric.lidJid || '').split('@')[0]);
-                  if (linkedReal && linkedReal.id && linkedReal.id.user) {
-                    return { phone: linkedReal.id.user, name: linkedReal.verifiedName || linkedReal.name || linkedReal.pushname || linkedReal.displayName };
+                if (lidEntry) {
+                  // Se ele tem lidJid, busca o @c.us correspondente
+                  if (lidEntry.lidJid) {
+                    const linked = all.find((c: any) =>
+                      c.id && c.id.server === 'c.us' &&
+                      c.lidJid && c.lidJid.split('@')[0] === lidEntry.lidJid.split('@')[0]
+                    );
+                    if (linked && linked.id && linked.id.user) {
+                      return { phone: linked.id.user, name: linked.verifiedName || linked.name || linked.pushname || linked.displayName };
+                    }
                   }
-                  if (byNumeric.phoneNumber) {
-                    return { phone: byNumeric.phoneNumber.split('@')[0], name: byNumeric.verifiedName || byNumeric.name || byNumeric.pushname };
+                  // Tenta phoneNumber direto no próprio lidEntry
+                  if (lidEntry.phoneNumber) {
+                    return {
+                      phone: lidEntry.phoneNumber.replace(/[^0-9]/g, ''),
+                      name: lidEntry.verifiedName || lidEntry.name || lidEntry.pushname
+                    };
                   }
+                }
+
+                // Estratégia 2b: varre todos procurando quem tem esse numericLid como lidJid user
+                const byLidUser = all.find((c: any) =>
+                  c.id && c.id.server === 'c.us' &&
+                  c.id.user && c.lidJid &&
+                  c.lidJid.split('@')[0] === numericLid
+                );
+                if (byLidUser && byLidUser.id && byLidUser.id.user) {
+                  return { phone: byLidUser.id.user, name: byLidUser.verifiedName || byLidUser.name || byLidUser.pushname };
                 }
               }
 
-              // Estratégia 3: Store.Contact.get direto pelo lidJid
+              // Estratégia 3: Store.Contact.get direto
               const lidContact = w.Store.Contact.get(lidJid);
               if (lidContact) {
                 return {
-                  phone: lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null,
+                  phone: lidContact.phoneNumber ? lidContact.phoneNumber.replace(/[^0-9]/g, '') : null,
                   name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
                 };
               }
             }
-          } catch(e) {}
+          } catch(e) { console.error('LID resolve error:', e); }
           return { phone: null, name: null };
-        }, rawChatId, (phone && phone.length > 13) ? phone : null);
+        }, rawChatId, phonePareceLid ? phone : null);
 
-        if (resolvedInfo) {
-          if (resolvedInfo.phone) {
-            phone = resolvedInfo.phone;
-            chatId = `${phone}@c.us`; 
+        if (resolvedInfo && resolvedInfo.phone) {
+          phone = resolvedInfo.phone;
+          chatId = `${phone}@c.us`;
+          if (resolvedInfo.name) {
+            name = resolvedInfo.name;
+          } else if (!name || name === contact.number || phonePareceLid) {
+            name = phone;
           }
-          if (resolvedInfo.name && name === contact.number) {
-            name = resolvedInfo.name; // Keep the verified name instead of LID
-          }
-          if (name === contact.number) {
-            name = phone; // Ensure name is at least the correct phone if name is missing
-          }
+        } else if (!resolvedInfo || !resolvedInfo.phone) {
+          // Resolução falhou: loga para diagnóstico
+          console.warn(`[LID] Não foi possível resolver: rawChatId=${rawChatId}, phone=${phone}`);
         }
       }
 
