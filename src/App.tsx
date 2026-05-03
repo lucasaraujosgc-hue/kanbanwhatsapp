@@ -1328,7 +1328,7 @@ export default function App() {
                   <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
                     {selectedChat.name || selectedChat.phone}
                   </h3>
-                  <p className="text-sm text-slate-500">{selectedChat.phone}</p>
+                  <p className="text-sm text-slate-500">{selectedChat.phone && selectedChat.phone.length <= 15 ? selectedChat.phone : ''}</p>
                 </div>
               </div>
               <div className="flex gap-2">
