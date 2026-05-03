@@ -1189,46 +1189,74 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
           try {
             const w = window as any;
             const stores = w.Store || {};
+            const lidUser = lidJid.split('@')[0];
 
-            // Tenta achar via Chat store
-            const chatObj = stores.Chat?.get(lidJid);
+            // Tenta Store.Chat.get com variações do JID
+            const attempts = [
+              lidJid,                          // 197057763631222@lid
+              `${lidUser}@c.us`,               // como @c.us
+              lidUser,                         // só o número
+            ];
+            let chatObj: any = null;
+            for (const attempt of attempts) {
+              chatObj = stores.Chat?.get(attempt);
+              if (chatObj) break;
+            }
+
+            // Se ainda não achou, varre todos os chats procurando pelo lid
+            if (!chatObj && stores.Chat) {
+              const allChats = stores.Chat.getModelsArray ? stores.Chat.getModelsArray() : [];
+              chatObj = allChats.find((c: any) =>
+                c.id?._serialized === lidJid ||
+                c.id?.user === lidUser ||
+                c.contact?.lid?.split('@')[0] === lidUser ||
+                c.contact?.id?.user === lidUser
+              );
+            }
+
             if (chatObj) {
-              // formattedTitle costuma ter o número formatado ex: +55 75 81949414
-              const title: string = chatObj.formattedTitle || chatObj.contact?.formattedTitle || '';
-              const digitsOnly = title.replace(/[^0-9]/g, '');
-              if (digitsOnly.length >= 8 && digitsOnly.length <= 13) {
-                return { phone: digitsOnly, name: chatObj.contact?.verifiedName || chatObj.contact?.name || chatObj.contact?.pushname || null };
-              }
-
-              // Tenta phoneNumber direto
-              const pn: string = chatObj.contact?.phoneNumber || chatObj.phoneNumber || '';
-              const pnDigits = pn.replace(/[^0-9]/g, '');
-              if (pnDigits.length >= 8 && pnDigits.length <= 13) {
-                return { phone: pnDigits, name: chatObj.contact?.verifiedName || chatObj.contact?.name || null };
-              }
-
-              // Tenta linkedJid (o @c.us real vinculado ao @lid)
-              const linked: string = chatObj.contact?.linkedJid || chatObj.linkedJid || chatObj.contact?.jid || '';
-              if (linked.includes('@c.us')) {
-                return { phone: linked.split('@')[0], name: chatObj.contact?.verifiedName || chatObj.contact?.name || null };
-              }
-
-              // Dump para diagnóstico se nada funcionou
               const c = chatObj.contact || {};
+              // Tenta todas as fontes conhecidas de número real
+              const candidates = [
+                c.formattedTitle,
+                c.phoneNumber,
+                c.linkedJid?.split('@')[0],
+                c.jid?.split('@')[0],
+                chatObj.formattedTitle,
+                chatObj.phoneNumber,
+              ];
+              for (const cand of candidates) {
+                if (!cand) continue;
+                const digits = String(cand).replace(/[^0-9]/g, '');
+                if (digits.length >= 8 && digits.length <= 13) {
+                  return { phone: digits, name: c.verifiedName || c.name || c.pushname || null };
+                }
+              }
+              // Dump completo do contact para diagnóstico
               return {
                 phone: null,
                 debug: JSON.stringify({
-                  keys: Object.keys(c).slice(0, 30),
+                  chatKeys: Object.keys(chatObj).slice(0, 20),
+                  contactKeys: Object.keys(c).slice(0, 30),
                   formattedTitle: c.formattedTitle,
                   phoneNumber: c.phoneNumber,
                   linkedJid: c.linkedJid,
                   jid: c.jid,
                   lid: c.lid,
                   id: c.id ? { user: c.id.user, server: c.id.server } : null,
+                  chatId: chatObj.id?._serialized,
                 })
               };
             }
-            return { phone: null, debug: 'chat not found in Store.Chat' };
+
+            // Dump geral: quantos chats existem e exemplos
+            const allChats = stores.Chat?.getModelsArray?.() || [];
+            const sample = allChats.slice(0, 3).map((c: any) => ({
+              id: c.id?._serialized,
+              contactId: c.contact?.id?._serialized,
+              contactLid: c.contact?.lid,
+            }));
+            return { phone: null, debug: `total_chats=${allChats.length}, sample=${JSON.stringify(sample)}` };
           } catch(e: any) {
             return { phone: null, debug: String(e) };
           }
