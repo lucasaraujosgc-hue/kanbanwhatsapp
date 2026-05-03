@@ -1182,57 +1182,97 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       let chatId = rawChatId;
 
       // Resolução de LID: quando o chatId ou phone não é um número real de telefone,
-      // usa waClient.getContactById() com o @lid para obter o contato real @c.us.
-      // LIDs numéricos têm 14+ dígitos; números BR reais têm no máximo 13 (55+DDD+9dig).
+      // tenta múltiplas estratégias para obter o número real @c.us.
       const phonePareceLid = !phone || phone.length > 13 || !/^[1-9]\d{7,13}$/.test(phone);
       if (rawChatId.includes('@lid') || phonePareceLid) {
-        try {
-          // Tenta resolver via getContactById passando o @lid diretamente
-          const lidContact = await waClient.getContactById(rawChatId.includes('@lid') ? rawChatId : `${phone}@lid`);
-          if (lidContact && lidContact.number && lidContact.number.length <= 13) {
-            phone = lidContact.number;
-            chatId = `${phone}@c.us`;
-            name = (lidContact as any).verifiedName || lidContact.name || lidContact.pushname || phone;
-          } else {
-            // Fallback: busca via pupPage no Store.Contact
-            const resolvedInfo = await waClient.pupPage.evaluate(async (lidJid) => {
+        const lidJid = rawChatId.includes('@lid') ? rawChatId : `${phone}@lid`;
+
+        const resolvedInfo = await waClient.pupPage.evaluate(async (lidJid) => {
+          try {
+            const w = window as any;
+
+            // Estratégia 1: UserUtils / getUserInfo para converter lid -> jid real
+            if (w.Store && w.Store.UserUtils) {
               try {
-                const w = window as any;
-                if (w.Store && w.Store.Contact) {
-                  const all = w.Store.Contact.getModelsArray();
-
-                  // Busca quem tem esse lid como lidJid e é @c.us
-                  const byLid = all.find((c: any) =>
-                    c.id && c.id.server === 'c.us' &&
-                    c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]
-                  );
-                  if (byLid && byLid.id && byLid.id.user) {
-                    return { phone: byLid.id.user, name: byLid.verifiedName || byLid.name || byLid.pushname };
-                  }
-
-                  // Busca quem tem esse lid no próprio id (e tem phoneNumber)
-                  const lidEntry = w.Store.Contact.get(lidJid);
-                  if (lidEntry && lidEntry.phoneNumber) {
-                    return {
-                      phone: lidEntry.phoneNumber.replace(/[^0-9]/g, ''),
-                      name: lidEntry.verifiedName || lidEntry.name || lidEntry.pushname
-                    };
-                  }
+                const wid = { user: lidJid.split('@')[0], server: 'lid' };
+                const info = await w.Store.UserUtils.getUserInfo([wid]);
+                if (info && info[0] && info[0].jid) {
+                  const realJid = info[0].jid;
+                  const realPhone = realJid.split('@')[0];
+                  return { phone: realPhone, name: info[0].verifiedName || info[0].name || null };
                 }
               } catch(e) {}
-              return { phone: null, name: null };
-            }, rawChatId.includes('@lid') ? rawChatId : `${phone}@lid`);
-
-            if (resolvedInfo && resolvedInfo.phone && resolvedInfo.phone.length <= 13) {
-              phone = resolvedInfo.phone;
-              chatId = `${phone}@c.us`;
-              if (resolvedInfo.name) name = resolvedInfo.name;
-            } else {
-              console.warn(`[LID] Não foi possível resolver: rawChatId=${rawChatId}, phone=${phone}`);
             }
-          }
-        } catch (lidErr) {
-          console.warn(`[LID] Erro ao resolver via getContactById: rawChatId=${rawChatId}`, lidErr);
+
+            // Estratégia 2: BusinessUtils
+            if (w.Store && w.Store.BusinessUtils) {
+              try {
+                const result = await w.Store.BusinessUtils.getPhoneFromLid(lidJid);
+                if (result && result.phone) return { phone: result.phone, name: null };
+              } catch(e) {}
+            }
+
+            // Estratégia 3: LidUtils / LidStore
+            if (w.Store && (w.Store.LidUtils || w.Store.LidStore)) {
+              try {
+                const utils = w.Store.LidUtils || w.Store.LidStore;
+                const result = await utils.resolvePhoneFromLid(lidJid);
+                if (result) return { phone: String(result).replace(/[^0-9]/g, ''), name: null };
+              } catch(e) {}
+            }
+
+            // Estratégia 4: Contact.getModelsArray com múltiplos critérios
+            if (w.Store && w.Store.Contact) {
+              const all = w.Store.Contact.getModelsArray();
+              const lidUser = lidJid.split('@')[0];
+
+              // 4a: lidJid field match
+              const byLidJid = all.find((c: any) =>
+                c.id && c.id.server === 'c.us' && c.lidJid &&
+                c.lidJid.split('@')[0] === lidUser
+              );
+              if (byLidJid) return { phone: byLidJid.id.user, name: byLidJid.verifiedName || byLidJid.name || byLidJid.pushname };
+
+              // 4b: lid field match
+              const byLid = all.find((c: any) =>
+                c.id && c.id.server === 'c.us' && c.lid &&
+                String(c.lid).split('@')[0] === lidUser
+              );
+              if (byLid) return { phone: byLid.id.user, name: byLid.verifiedName || byLid.name || byLid.pushname };
+
+              // 4c: phoneNumber no contato @lid
+              const lidEntry = w.Store.Contact.get(lidJid);
+              if (lidEntry && lidEntry.phoneNumber) {
+                return { phone: lidEntry.phoneNumber.replace(/[^0-9]/g, ''), name: lidEntry.verifiedName || lidEntry.name || lidEntry.pushname };
+              }
+            }
+
+            // Estratégia 5: chamar API interna de query de contato por lid
+            if (w.Store && w.Store.QueryExist) {
+              try {
+                const result = await w.Store.QueryExist(`${lidJid.split('@')[0]}@lid`);
+                if (result && result.jid) {
+                  return { phone: result.jid.split('@')[0], name: null };
+                }
+              } catch(e) {}
+            }
+
+          } catch(e) { console.error('[LID pupPage error]', e); }
+          return { phone: null, name: null };
+        }, lidJid);
+
+        if (resolvedInfo && resolvedInfo.phone && resolvedInfo.phone.length <= 13) {
+          phone = resolvedInfo.phone;
+          chatId = `${phone}@c.us`;
+          if (resolvedInfo.name) name = resolvedInfo.name;
+          else if (!name || phonePareceLid) name = phone;
+        } else {
+          // Último recurso: loga todas as keys do Store para diagnóstico
+          const storeKeys = await waClient.pupPage.evaluate(() => {
+            try { return Object.keys((window as any).Store || {}); } catch(e) { return []; }
+          });
+          console.warn(`[LID] Não resolvido: lidJid=${lidJid}, phone=${phone}`);
+          console.warn(`[LID] Store keys disponíveis: ${storeKeys.join(', ')}`);
         }
       }
 
