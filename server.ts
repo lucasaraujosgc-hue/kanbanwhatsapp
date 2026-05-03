@@ -1181,7 +1181,8 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       let phone = contact.number;
       let chatId = rawChatId;
 
-      if (rawChatId.includes('@lid') || (phone && phone.length > 14)) {
+      const phonePareceLid = !phone || phone.length > 13 || !/^[1-9]\d{7,14}$/.test(phone);
+      if (rawChatId.includes('@lid') || phonePareceLid) {
         const resolvedInfo = await waClient.pupPage.evaluate(async (lidJid) => {
           try {
             const w = window as any;
