@@ -140,7 +140,7 @@ db.serialize(() => {
           db.run("UPDATE messages SET chat_id = '557591167094@c.us' WHERE chat_id = ?", [row.id]);
           db.run("UPDATE OR IGNORE chat_tags SET chat_id = '557591167094@c.us' WHERE chat_id = ?", [row.id]);
         }
-      );
+      });
     }
   });
 
