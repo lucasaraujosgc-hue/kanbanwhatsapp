@@ -1175,27 +1175,57 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       const chat = await msg.getChat();
       if (chat.isGroup) return; // Ignore groups for now
 
-      // Usa msg.from / msg.to para obter o JID real (@c.us), evitando o @lid
-      // msg.from = quem enviou, msg.to = destinatário
-      // Para mensagens recebidas: msg.from = contato@c.us
-      // Para mensagens enviadas (fromMe): msg.to = contato@c.us
-      const fromMeEarly = msg.fromMe;
-      const remoteJid: string = fromMeEarly
-        ? (msg as any).to || (msg as any).id?.remote?._serialized || chat.id._serialized
-        : (msg as any).from || (msg as any).id?.remote?._serialized || chat.id._serialized;
-
-      // Se o remoteJid já vier como @c.us, usa direto; senão cai no chat.id
-      const resolvedJid = remoteJid.includes('@c.us') ? remoteJid : chat.id._serialized;
-
-      let chatId = resolvedJid;
-      let phone = chatId.split('@')[0];
+      // O WhatsApp passa @lid tanto no chat.id quanto no msg.from para esses contatos.
+      // A única fonte confiável do número real é msg.id.remote quando vem como @c.us,
+      // ou então buscamos via chat.getContact() e forçamos o chatId correto.
+      const rawChatId = chat.id._serialized;
 
       let contact = await chat.getContact();
-      let name = (contact as any).verifiedName || contact.name || contact.pushname || phone;
+      let name = (contact as any).verifiedName || contact.name || contact.pushname || contact.number;
 
-      // Se ainda assim phone parece LID (14+ dígitos), loga para diagnóstico
-      if (phone.length > 13) {
-        console.warn(`[LID] Não resolvido via msg.from/to: chatId=${chatId}, remoteJid=${remoteJid}, from=${(msg as any).from}, to=${(msg as any).to}`);
+      // Tenta extrair o número real de múltiplas fontes
+      let phone: string = '';
+      let chatId: string = rawChatId;
+
+      // Fonte 1: msg.id.remote (o JID remoto da mensagem)
+      const msgRemote: string = (msg as any).id?.remote?._serialized || (msg as any).id?.remote || '';
+      // Fonte 2: contact.number
+      const contactNumber: string = contact.number || '';
+
+      // Usa a primeira fonte que seja um número real (<=13 dígitos, só números)
+      const isRealPhone = (s: string) => s && /^[0-9]+$/.test(s) && s.length <= 13 && s.length >= 8;
+
+      if (isRealPhone(contactNumber)) {
+        phone = contactNumber;
+        chatId = msgRemote.includes('@c.us') ? msgRemote : `${phone}@c.us`;
+      } else if (msgRemote.includes('@c.us') && isRealPhone(msgRemote.split('@')[0])) {
+        phone = msgRemote.split('@')[0];
+        chatId = msgRemote;
+      } else {
+        // Último recurso: tenta via pupPage buscando pelo chat diretamente
+        const resolved = await waClient.pupPage.evaluate(async (lidJid) => {
+          try {
+            const w = window as any;
+            if (!w.Store?.Chat) return null;
+            const chatObj = w.Store.Chat.get(lidJid);
+            if (!chatObj) return null;
+            // Tenta contact associado ao chat
+            const c = chatObj.contact;
+            if (c?.phoneNumber) return { phone: c.phoneNumber.replace(/[^0-9]/g, ''), name: c.verifiedName || c.name || c.pushname };
+            if (c?.id?.server === 'c.us') return { phone: c.id.user, name: c.verifiedName || c.name || c.pushname };
+          } catch(e) {}
+          return null;
+        }, rawChatId);
+
+        if (resolved && isRealPhone(resolved.phone)) {
+          phone = resolved.phone;
+          chatId = `${phone}@c.us`;
+          if (resolved.name) name = resolved.name;
+        } else {
+          phone = rawChatId.split('@')[0];
+          chatId = rawChatId;
+          console.warn(`[LID] Não resolvido: rawChatId=${rawChatId}, contactNumber=${contactNumber}, msgRemote=${msgRemote}`);
+        }
       }
 
       let body = msg.body;
