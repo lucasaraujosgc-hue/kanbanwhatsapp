@@ -564,33 +564,6 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
     });
   });
 
-  app.get('/api/test-contact/:id', async (req, res) => {
-    if (!waClient) return res.status(400).send('waClient not ready');
-    try {
-      const contactId = req.params.id; // provide full id like 5511999999999@c.us
-      const contact = await waClient.getContactById(contactId);
-      
-      const evalData = await waClient.pupPage.evaluate(async (id: string) => {
-          const w = window as any;
-          const c = w.Store.Contact.get(id);
-          return c ? Object.keys(c).reduce((acc, k) => {
-              if (typeof c[k] === 'string' || typeof c[k] === 'number' || typeof c[k] === 'boolean' || c[k] === null) {
-                  acc[k] = c[k];
-              } else if (c[k] && typeof c[k] === 'object' && c[k].user) { // check for wid
-                  acc[k] = c[k]._serialized || c[k];
-              }
-              return acc;
-          }, {} as any) : null;
-      }, contactId);
-
-      res.json({
-         nativeContact: contact,
-         evalData: evalData
-      });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
   app.get('/api/tags', (req, res) => {
     db.all("SELECT * FROM tags", (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
@@ -918,68 +891,9 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         // Ignore error for @lid contacts or other special contacts
       }
       
-      let profilePicUrl = null;
-      let contactObj = null;
-
-      try {
-        contactObj = await waClient.getContactById(chatId);
-      } catch (e) {}
-
-      // Try using the getProfilePicUrl from our getProfilePicUrl helper
-      profilePicUrl = await getProfilePicUrl(waClient, chatId);
-      
-      // If none of those worked, and we have a contact object
-      if (!profilePicUrl && contactObj) {
-         try {
-            profilePicUrl = await contactObj.getProfilePicUrl();
-         } catch (e) {}
-
-         // Try reading LID from the contact if accessible directly
-         if (!profilePicUrl && (contactObj as any).id?.fromMe === false && (contactObj as any).id?.server === 'lid') {
-            profilePicUrl = await getProfilePicUrl(waClient, (contactObj as any).id._serialized);
-         }
-      }
-
-      // Final fallback to WWebJS native method
+      let profilePicUrl = await getProfilePicUrl(waClient, chatId);
       if (!profilePicUrl) {
-         profilePicUrl = await waClient.getProfilePicUrl(chatId).catch(() => null);
-      }
-
-      // Also try to salvage a real name and LID picture from puppeteer context
-      let realNameFromEval: string | null = null;
-      
-      const evalData = await waClient.pupPage.evaluate(async (id: string) => {
-          try {
-             const w = window as any;
-             const c = w.Store.Contact.get(id);
-             let foundUrl = null;
-             let foundName = c ? (c.name || c.pushname || null) : null;
-             
-             // lid or lidJid
-             const lidStr = c && (c.lidJid || c.lid);
-             if (lidStr) {
-                const lidWid = typeof lidStr === 'string' ? w.Store.WidFactory.createWid(lidStr) : lidStr;
-                
-                if (w.Store.ProfilePic && w.Store.ProfilePic.profilePicFind) {
-                    const res = await w.Store.ProfilePic.profilePicFind(lidWid);
-                    if (res && res.eurl) foundUrl = res.eurl;
-                }
-                if (!foundUrl && w.Store.ProfilePic && w.Store.ProfilePic.requestProfilePicFromServer) {
-                    const res = await w.Store.ProfilePic.requestProfilePicFromServer(lidWid);
-                    if (res && res.eurl) foundUrl = res.eurl;
-                }
-             }
-             return { url: foundUrl, name: foundName };
-          } catch(e) {
-             return { url: null, name: null };
-          }
-      }, chatId);
-
-      if (!profilePicUrl && evalData && evalData.url) {
-         profilePicUrl = evalData.url;
-      }
-      if (evalData && evalData.name) {
-         realNameFromEval = evalData.name;
+        profilePicUrl = await waClient.getProfilePicUrl(chatId).catch(() => null);
       }
 
       let profilePic = null;
@@ -988,8 +902,8 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       }
 
       db.run(
-        "UPDATE chats SET profile_pic = ? WHERE id = ?",
-        [profilePic || null, chatId],
+        "UPDATE chats SET profile_pic = ?, name = ? WHERE id = ?",
+        [profilePic || null, name, chatId],
         (err) => {
           if (err) {
             console.error(`Error updating chat info for ${chatId}:`, err);
@@ -998,22 +912,11 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
           io.emit('chat_updated', {
             id: chatId,
+            name: name,
             profile_pic: profilePic || null
           });
         }
       );
-
-      // Attempt to repair names that got corrupted into IDs/numbers by previous bugs
-      db.get("SELECT name, phone FROM chats WHERE id = ?", [chatId], (err, row: any) => {
-         if (!err && row && (row.name === chatId || row.name === row.phone || !row.name)) {
-            const betterName = realNameFromEval || name;
-            if (betterName && betterName !== chatId && betterName !== row.phone && betterName !== '') {
-               db.run("UPDATE chats SET name = ? WHERE id = ?", [betterName, chatId], () => {
-                  io.emit('chat_updated', { id: chatId, name: betterName });
-               });
-            }
-         }
-      });
 
       return profilePic || null;
     } catch (error) {
@@ -1274,14 +1177,9 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
                 });
               }
               
-              let finalName = chatRow.name;
-              if ((chatRow.name === chatId || chatRow.name === phone || chatRow.name === '') && name !== chatId && name !== phone && name !== '') {
-                finalName = name;
-              }
-
               db.run(`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?, name = ?, last_message_from_me = ?${unreadUpdate} WHERE id = ?`,
-                [displayBody, timestamp, finalProfilePic, finalName, fromMe, chatId], () => {
-                  io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name: finalName, last_message_from_me: fromMe });
+                [displayBody, timestamp, finalProfilePic, name, fromMe, chatId], () => {
+                  io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name, last_message_from_me: fromMe });
                 });
             });
           }
