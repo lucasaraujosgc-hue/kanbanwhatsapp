@@ -1029,17 +1029,35 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
             try {
               const w = window as any;
               if (w.Store && w.Store.Contact) {
+                const lidUser = lid.includes('@') ? lid.split('@')[0] : lid;
                 const contacts = w.Store.Contact.getModelsArray();
-                const realContact = contacts.find(c => c.lidJid === lid && c.id && c.id.server === 'c.us');
+                // Strategy 1: find c.us contact whose lidJid matches (try both formats)
+                const realContact = contacts.find((c: any) =>
+                  c.id && c.id.server === 'c.us' &&
+                  (c.lidJid === lid || c.lidJid === lidUser || c.lidJid === lidUser + '@lid')
+                );
                 if (realContact && realContact.id && realContact.id.user) {
                   return { phone: realContact.id.user, name: realContact.verifiedName || realContact.name || realContact.pushname || realContact.displayName };
                 }
-                const lidContact = w.Store.Contact.get(lid);
-                if (lidContact) {
-                  return { 
-                    phone: (lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null), 
-                    name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
-                  };
+                // Strategy 2: direct lookup via lid JID and via c.us equivalent
+                for (const lookupId of [lid, lidUser + '@lid', lidUser + '@c.us']) {
+                  const c = w.Store.Contact.get(lookupId);
+                  if (c) {
+                    if (c.id && c.id.server === 'c.us' && c.id.user) {
+                      return { phone: c.id.user, name: c.verifiedName || c.name || c.pushname || c.displayName };
+                    }
+                    if (c.phoneNumber) {
+                      return { phone: c.phoneNumber.split('@')[0], name: c.verifiedName || c.name || c.pushname || c.displayName };
+                    }
+                    if (c.linkedContact && c.linkedContact.id && c.linkedContact.id.server === 'c.us') {
+                      return { phone: c.linkedContact.id.user, name: c.linkedContact.verifiedName || c.linkedContact.name || c.linkedContact.pushname };
+                    }
+                  }
+                }
+                // Strategy 3: scan for matching user number
+                const fallback = contacts.find((c: any) => c.id && c.id.server === 'c.us' && c.id.user === lidUser);
+                if (fallback) {
+                  return { phone: fallback.id.user, name: fallback.verifiedName || fallback.name || fallback.pushname || fallback.displayName };
                 }
               }
             } catch(e) {}
@@ -1200,19 +1218,38 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
           try {
             const w = window as any;
             if (w.Store && w.Store.Contact) {
+              const lidUser = lid.includes('@') ? lid.split('@')[0] : lid;
               const contacts = w.Store.Contact.getModelsArray();
-              // Try to find the c.us contact that has this lidJid
-              const realContact = contacts.find(c => c.lidJid === lid && c.id && c.id.server === 'c.us');
+              // Strategy 1: find c.us contact whose lidJid matches (try both formats)
+              const realContact = contacts.find((c: any) =>
+                c.id && c.id.server === 'c.us' &&
+                (c.lidJid === lid || c.lidJid === lidUser || c.lidJid === lidUser + '@lid')
+              );
               if (realContact && realContact.id && realContact.id.user) {
                 return { phone: realContact.id.user, name: realContact.verifiedName || realContact.name || realContact.pushname || realContact.displayName };
               }
-              // Try fetching from the lid contact itself
-              const lidContact = w.Store.Contact.get(lid);
-              if (lidContact) {
-                return { 
-                  phone: (lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null), 
-                  name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
-                };
+              // Strategy 2: direct lookup via lid JID and via c.us equivalent
+              for (const lookupId of [lid, lidUser + '@lid', lidUser + '@c.us']) {
+                const c = w.Store.Contact.get(lookupId);
+                if (c) {
+                  // If this is a c.us contact, return directly
+                  if (c.id && c.id.server === 'c.us' && c.id.user) {
+                    return { phone: c.id.user, name: c.verifiedName || c.name || c.pushname || c.displayName };
+                  }
+                  // If it's a lid contact with a phoneNumber, use that
+                  if (c.phoneNumber) {
+                    return { phone: c.phoneNumber.split('@')[0], name: c.verifiedName || c.name || c.pushname || c.displayName };
+                  }
+                  // If it has a linked c.us contact
+                  if (c.linkedContact && c.linkedContact.id && c.linkedContact.id.server === 'c.us') {
+                    return { phone: c.linkedContact.id.user, name: c.linkedContact.verifiedName || c.linkedContact.name || c.linkedContact.pushname };
+                  }
+                }
+              }
+              // Strategy 3: scan all contacts for a matching number in the lid user part
+              const fallback = contacts.find((c: any) => c.id && c.id.server === 'c.us' && c.id.user === lidUser);
+              if (fallback) {
+                return { phone: fallback.id.user, name: fallback.verifiedName || fallback.name || fallback.pushname || fallback.displayName };
               }
             }
           } catch(e) {}
@@ -1236,7 +1273,8 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
           if (name === contact.number) {
             name = resolvedPhone; // prevent setting name to the LID string
           }
-        }
+        } else if (phone && phone.length > 14) {
+            phone = null as any;
       }
 
       // Important: Use the resolved phone number for the chatId if it was a LID
