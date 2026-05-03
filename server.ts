@@ -1028,13 +1028,15 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
           let resolvedInfo = await waClient.pupPage.evaluate(async (lid) => {
             try {
               const w = window as any;
+              const lidNumber = lid.split('@')[0];
+              const lidJid = `${lidNumber}@lid`;
               if (w.Store && w.Store.Contact) {
                 const contacts = w.Store.Contact.getModelsArray();
-                const realContact = contacts.find(c => c.lidJid === lid && c.id && c.id.server === 'c.us');
+                const realContact = contacts.find(c => c.lidJid === lidJid && c.id && c.id.server === 'c.us');
                 if (realContact && realContact.id && realContact.id.user) {
                   return { phone: realContact.id.user, name: realContact.verifiedName || realContact.name || realContact.pushname || realContact.displayName };
                 }
-                const lidContact = w.Store.Contact.get(lid);
+                const lidContact = w.Store.Contact.get(lidJid);
                 if (lidContact) {
                   return { 
                     phone: (lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null), 
@@ -1199,15 +1201,17 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         let resolvedInfo = await waClient.pupPage.evaluate(async (lid) => {
           try {
             const w = window as any;
+            const lidNumber = lid.split('@')[0];
+            const lidJid = `${lidNumber}@lid`;
             if (w.Store && w.Store.Contact) {
               const contacts = w.Store.Contact.getModelsArray();
               // Try to find the c.us contact that has this lidJid
-              const realContact = contacts.find(c => c.lidJid === lid && c.id && c.id.server === 'c.us');
+              const realContact = contacts.find(c => c.lidJid === lidJid && c.id && c.id.server === 'c.us');
               if (realContact && realContact.id && realContact.id.user) {
                 return { phone: realContact.id.user, name: realContact.verifiedName || realContact.name || realContact.pushname || realContact.displayName };
               }
               // Try fetching from the lid contact itself
-              const lidContact = w.Store.Contact.get(lid);
+              const lidContact = w.Store.Contact.get(lidJid);
               if (lidContact) {
                 return { 
                   phone: (lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null), 
