@@ -1181,17 +1181,38 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       let phone = contact.number;
       let chatId = rawChatId;
 
-      const phonePareceLid = !phone || phone.length > 13 || !/^[1-9]\d{7,14}$/.test(phone);
+      const phonePareceLid = !phone || phone.length > 13 || !/^[1-9]\d{7,13}$/.test(phone);
       if (rawChatId.includes('@lid') || phonePareceLid) {
-        const resolvedInfo = await waClient.pupPage.evaluate(async (lidJid) => {
+        const resolvedInfo = await waClient.pupPage.evaluate(async (lidJid, numericLid) => {
           try {
             const w = window as any;
             if (w.Store && w.Store.Contact) {
               const all = w.Store.Contact.getModelsArray();
+
+              // Estratégia 1: busca pelo lidJid (quando rawChatId é @lid)
               const real = all.find((c: any) => c.id && c.id.server === 'c.us' && c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]);
               if (real && real.id && real.id.user) {
                 return { phone: real.id.user, name: real.verifiedName || real.name || real.pushname || real.displayName };
               }
+
+              // Estratégia 2: busca pelo número LID numérico no campo id.user ou lidJid
+              if (numericLid) {
+                const byNumeric = all.find((c: any) =>
+                  (c.id && c.id.user === numericLid) ||
+                  (c.lidJid && c.lidJid.split('@')[0] === numericLid)
+                );
+                if (byNumeric) {
+                  const linkedReal = all.find((c: any) => c.id && c.id.server === 'c.us' && c.lidJid && c.lidJid.split('@')[0] === (byNumeric.lidJid || '').split('@')[0]);
+                  if (linkedReal && linkedReal.id && linkedReal.id.user) {
+                    return { phone: linkedReal.id.user, name: linkedReal.verifiedName || linkedReal.name || linkedReal.pushname || linkedReal.displayName };
+                  }
+                  if (byNumeric.phoneNumber) {
+                    return { phone: byNumeric.phoneNumber.split('@')[0], name: byNumeric.verifiedName || byNumeric.name || byNumeric.pushname };
+                  }
+                }
+              }
+
+              // Estratégia 3: Store.Contact.get direto pelo lidJid
               const lidContact = w.Store.Contact.get(lidJid);
               if (lidContact) {
                 return {
@@ -1202,7 +1223,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
             }
           } catch(e) {}
           return { phone: null, name: null };
-        }, rawChatId);
+        }, rawChatId, (phone && phone.length > 13) ? phone : null);
 
         if (resolvedInfo) {
           if (resolvedInfo.phone) {
