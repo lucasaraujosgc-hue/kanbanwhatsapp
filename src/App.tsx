@@ -383,9 +383,6 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      // Background repair of corrupted names (run once per connect/fetchData if necessary, but safe to call anytime)
-      apiFetch('/api/repair-names', { method: 'POST' }).catch(() => {});
-
       const [colsRes, chatsRes, tagsRes, waRes] = await Promise.all([
         apiFetch('/api/columns'),
         apiFetch('/api/chats'),
@@ -700,25 +697,6 @@ export default function App() {
     await apiFetch('/api/wa/restart', { method: 'POST' });
   };
 
-  const handleExport = async () => {
-    try {
-      const res = await apiFetch('/api/export');
-      if (!res.ok) throw new Error('Falha ao exportar');
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = "whatskanban_export.zip";
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (e) {
-      console.error('Error exporting:', e);
-      alert('Erro ao exportar sistema.');
-    }
-  };
-
   const handleCopilotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!copilotInput.trim() || isCopilotLoading) return;
@@ -855,28 +833,12 @@ export default function App() {
               )}
               
               {waStatus === 'connected' && (
-                <div className="mt-2 space-y-2">
-                  <button 
-                    onClick={async () => {
-                      try {
-                        const res = await apiFetch('/api/repair-names', { method: 'POST' });
-                        alert(`Contatos corrigidos!`);
-                        fetchData();
-                      } catch(e) {
-                        alert('Erro ao reparar contatos');
-                      }
-                    }}
-                    className="w-full flex items-center justify-center gap-1 text-xs text-blue-600 bg-blue-50 py-2 rounded-lg hover:bg-blue-100 transition-colors font-medium border border-blue-100"
-                  >
-                    <RefreshCw size={12} /> Corrigir .lid 
-                  </button>
-                  <button 
-                    onClick={handleResetWa}
-                    className="w-full flex items-center justify-center gap-1 text-xs text-rose-600 bg-rose-50 py-2 rounded-lg hover:bg-rose-100 transition-colors font-medium border border-rose-100"
-                  >
-                    <RefreshCw size={12} /> Desconectar
-                  </button>
-                </div>
+                <button 
+                  onClick={handleResetWa}
+                  className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-rose-600 bg-rose-50 py-2 rounded-lg hover:bg-rose-100 transition-colors font-medium border border-rose-100"
+                >
+                  <RefreshCw size={12} /> Desconectar
+                </button>
               )}
               
               {(waStatus === 'error' || waStatus === 'disconnected') && (
@@ -917,13 +879,6 @@ export default function App() {
                 className="w-full mt-2 flex items-center justify-center gap-2 text-sm text-purple-600 bg-purple-50 py-2.5 rounded-lg hover:bg-purple-100 transition-colors font-medium border border-purple-200 shadow-sm"
               >
                 <Bot size={16} /> Base de Conhecimento IA
-              </button>
-              
-              <button 
-                onClick={handleExport}
-                className="w-full mt-2 flex items-center justify-center gap-2 text-sm text-emerald-600 bg-emerald-50 py-2.5 rounded-lg hover:bg-emerald-100 transition-colors font-medium border border-emerald-200 shadow-sm"
-              >
-                <Download size={16} /> Exportar Sistema (.zip)
               </button>
             </div>
 
@@ -1161,31 +1116,28 @@ export default function App() {
                       <div className={`w-8 h-8 rounded-full border border-slate-100 bg-slate-100 flex items-center justify-center text-slate-500 font-semibold flex-shrink-0 ${chat.profile_pic ? 'hidden' : ''}`}>
                         {chat.name ? chat.name.charAt(0).toUpperCase() : '?'}
                       </div>
-                      <div className="flex flex-col flex-1 min-w-0">
-                        {editingChatNameId === chat.id ? (
-                          <input
-                            type="text"
-                            value={editChatName}
-                            onChange={(e) => setEditChatName(e.target.value)}
-                            onBlur={() => handleEditChatName(chat.id)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleEditChatName(chat.id)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="font-medium text-slate-800 border-b border-emerald-500 focus:outline-none w-full bg-slate-50 px-1 rounded-t"
-                            autoFocus
-                          />
-                        ) : (
-                          <h4 className="font-semibold text-slate-800 tracking-tight truncate pr-2 flex items-center gap-1 group/name">
-                            {chat.name || chat.phone}
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setEditingChatNameId(chat.id); setEditChatName(chat.name || chat.phone); }}
-                              className="opacity-0 group-hover/name:opacity-100 text-slate-400 hover:text-emerald-500 transition-opacity"
-                            >
-                              <Edit2 size={12} />
-                            </button>
-                          </h4>
-                        )}
-                        {chat.phone && <span className="text-[10px] text-slate-400 font-medium truncate">{chat.phone}</span>}
-                      </div>
+                      {editingChatNameId === chat.id ? (
+                        <input
+                          type="text"
+                          value={editChatName}
+                          onChange={(e) => setEditChatName(e.target.value)}
+                          onBlur={() => handleEditChatName(chat.id)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleEditChatName(chat.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="font-medium text-slate-800 border-b border-emerald-500 focus:outline-none w-full bg-slate-50 px-1 rounded-t"
+                          autoFocus
+                        />
+                      ) : (
+                        <h4 className="font-semibold text-slate-800 tracking-tight truncate pr-2 flex items-center gap-1 group/name">
+                          {chat.name || chat.phone}
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setEditingChatNameId(chat.id); setEditChatName(chat.name || chat.phone); }}
+                            className="opacity-0 group-hover/name:opacity-100 text-slate-400 hover:text-emerald-500 transition-opacity"
+                          >
+                            <Edit2 size={12} />
+                          </button>
+                        </h4>
+                      )}
                     </div>
                     {chat.unread_count > 0 && (
                       <span className="bg-emerald-500 text-white shadow-sm text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0">

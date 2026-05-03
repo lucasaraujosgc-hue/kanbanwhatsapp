@@ -129,11 +129,6 @@ db.serialize(() => {
   db.run(`ALTER TABLE messages ADD COLUMN media_name TEXT`, (err) => { /* ignore */ });
   db.run(`ALTER TABLE messages ADD COLUMN transcription TEXT`, (err) => { /* ignore */ });
 
-  // Hotfix delete 0@c.us (corrupted or dummy chat)
-  db.run("DELETE FROM messages WHERE chat_id = '0@c.us'");
-  db.run("DELETE FROM chat_tags WHERE chat_id = '0@c.us'");
-  db.run("DELETE FROM chats WHERE id = '0@c.us' OR id = '0' OR phone = '0'");
-
   // Insert default columns if empty
   db.get("SELECT COUNT(*) as count FROM columns", (err, row: any) => {
     if (row && row.count === 0) {
@@ -569,6 +564,33 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
     });
   });
 
+  app.get('/api/test-contact/:id', async (req, res) => {
+    if (!waClient) return res.status(400).send('waClient not ready');
+    try {
+      const contactId = req.params.id; // provide full id like 5511999999999@c.us
+      const contact = await waClient.getContactById(contactId);
+      
+      const evalData = await waClient.pupPage.evaluate(async (id: string) => {
+          const w = window as any;
+          const c = w.Store.Contact.get(id);
+          return c ? Object.keys(c).reduce((acc, k) => {
+              if (typeof c[k] === 'string' || typeof c[k] === 'number' || typeof c[k] === 'boolean' || c[k] === null) {
+                  acc[k] = c[k];
+              } else if (c[k] && typeof c[k] === 'object' && c[k].user) { // check for wid
+                  acc[k] = c[k]._serialized || c[k];
+              }
+              return acc;
+          }, {} as any) : null;
+      }, contactId);
+
+      res.json({
+         nativeContact: contact,
+         evalData: evalData
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
   app.get('/api/tags', (req, res) => {
     db.all("SELECT * FROM tags", (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
@@ -733,10 +755,8 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         const msgId = sentMsg.id.id;
         const timestamp = Date.now();
         
-        db.run("INSERT OR IGNORE INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-          [msgId, chatId, body || '', 1, timestamp, mediaUrl, mediaType, mediaName], (err: any) => {
-            if (err) console.error("Message insert error:", err);
-          });
+        db.run("INSERT INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [msgId, chatId, body || '', 1, timestamp, mediaUrl, mediaType, mediaName]);
           
         db.run("UPDATE chats SET last_message = ?, last_message_time = ?, last_message_from_me = 1 WHERE id = ?",
           [body || 'Media', timestamp, chatId]);
@@ -884,7 +904,6 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
   const syncChatProfilePic = async (chatId: string) => {
     if (!waClient || waStatus !== 'connected') return null;
-    if (!chatId || chatId === '0@c.us') return null;
 
     try {
       const chat = await waClient.getChatById(chatId);
@@ -894,20 +913,73 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         const contact = await chat.getContact();
         if (contact) {
           name = contact.name || contact.pushname || contact.number || name;
-          if (name && name.length > 14 && name.startsWith('105')) {
-             // specific workaround if it falls back to a LID phone number
-             if (chatId.includes('105403295727623') || name === '105403295727623' || chatId === '557591167094@c.us') {
-               name = '557591167094';
-             }
-          }
         }
       } catch (e) {
         // Ignore error for @lid contacts or other special contacts
       }
       
-      let profilePicUrl = await getProfilePicUrl(waClient, chatId);
+      let profilePicUrl = null;
+      let contactObj = null;
+
+      try {
+        contactObj = await waClient.getContactById(chatId);
+      } catch (e) {}
+
+      // Try using the getProfilePicUrl from our getProfilePicUrl helper
+      profilePicUrl = await getProfilePicUrl(waClient, chatId);
+      
+      // If none of those worked, and we have a contact object
+      if (!profilePicUrl && contactObj) {
+         try {
+            profilePicUrl = await contactObj.getProfilePicUrl();
+         } catch (e) {}
+
+         // Try reading LID from the contact if accessible directly
+         if (!profilePicUrl && (contactObj as any).id?.fromMe === false && (contactObj as any).id?.server === 'lid') {
+            profilePicUrl = await getProfilePicUrl(waClient, (contactObj as any).id._serialized);
+         }
+      }
+
+      // Final fallback to WWebJS native method
       if (!profilePicUrl) {
-        profilePicUrl = await waClient.getProfilePicUrl(chatId).catch(() => null);
+         profilePicUrl = await waClient.getProfilePicUrl(chatId).catch(() => null);
+      }
+
+      // Also try to salvage a real name and LID picture from puppeteer context
+      let realNameFromEval: string | null = null;
+      
+      const evalData = await waClient.pupPage.evaluate(async (id: string) => {
+          try {
+             const w = window as any;
+             const c = w.Store.Contact.get(id);
+             let foundUrl = null;
+             let foundName = c ? (c.name || c.pushname || null) : null;
+             
+             // lid or lidJid
+             const lidStr = c && (c.lidJid || c.lid);
+             if (lidStr) {
+                const lidWid = typeof lidStr === 'string' ? w.Store.WidFactory.createWid(lidStr) : lidStr;
+                
+                if (w.Store.ProfilePic && w.Store.ProfilePic.profilePicFind) {
+                    const res = await w.Store.ProfilePic.profilePicFind(lidWid);
+                    if (res && res.eurl) foundUrl = res.eurl;
+                }
+                if (!foundUrl && w.Store.ProfilePic && w.Store.ProfilePic.requestProfilePicFromServer) {
+                    const res = await w.Store.ProfilePic.requestProfilePicFromServer(lidWid);
+                    if (res && res.eurl) foundUrl = res.eurl;
+                }
+             }
+             return { url: foundUrl, name: foundName };
+          } catch(e) {
+             return { url: null, name: null };
+          }
+      }, chatId);
+
+      if (!profilePicUrl && evalData && evalData.url) {
+         profilePicUrl = evalData.url;
+      }
+      if (evalData && evalData.name) {
+         realNameFromEval = evalData.name;
       }
 
       let profilePic = null;
@@ -916,8 +988,8 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       }
 
       db.run(
-        "UPDATE chats SET profile_pic = ?, name = ? WHERE id = ?",
-        [profilePic || null, name, chatId],
+        "UPDATE chats SET profile_pic = ? WHERE id = ?",
+        [profilePic || null, chatId],
         (err) => {
           if (err) {
             console.error(`Error updating chat info for ${chatId}:`, err);
@@ -926,19 +998,26 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
           io.emit('chat_updated', {
             id: chatId,
-            name: name,
             profile_pic: profilePic || null
           });
         }
       );
 
+      // Attempt to repair names that got corrupted into IDs/numbers by previous bugs
+      db.get("SELECT name, phone FROM chats WHERE id = ?", [chatId], (err, row: any) => {
+         if (!err && row && (row.name === chatId || row.name === row.phone || !row.name)) {
+            const betterName = realNameFromEval || name;
+            if (betterName && betterName !== chatId && betterName !== row.phone && betterName !== '') {
+               db.run("UPDATE chats SET name = ? WHERE id = ?", [betterName, chatId], () => {
+                  io.emit('chat_updated', { id: chatId, name: betterName });
+               });
+            }
+         }
+      });
+
       return profilePic || null;
-    } catch (error: any) {
-      if (error && error.message && (error.message.includes('getChat') || error.message.includes('No LID for user') || error.message.includes('Cannot read properties of undefined'))) {
-        // Silly warning due to WhatsApp internal changes on non-existent chats, ignore silently
-      } else {
-        console.error(`Error syncing chat info for ${chatId}:`, error);
-      }
+    } catch (error) {
+      console.error(`Error syncing chat info for ${chatId}:`, error);
       return null;
     }
   };
@@ -973,152 +1052,15 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       }
 
       try {
-        let count = 0;
         for (const row of rows) {
-          if (row.id && row.id !== '0@c.us' && !row.id.startsWith('0@')) {
-            await syncChatProfilePic(row.id);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            count++;
-          }
+          await syncChatProfilePic(row.id);
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        res.json({ success: true, total: count });
+        res.json({ success: true, total: rows.length });
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
-    });
-  });
-
-  app.post('/api/repair-names', async (req, res) => {
-    if (!waClient || waStatus !== 'connected') {
-      return res.status(400).json({ error: 'WhatsApp not connected' });
-    }
-
-    // specific fix for 105403295727623 -> 557591167094
-    db.run("UPDATE chats SET id = '557591167094@c.us', phone = '557591167094', name = '557591167094' WHERE id LIKE '%105403295727623%' OR phone LIKE '%105403295727623%'", (err) => {
-      if(err && err.message.includes('UNIQUE constraint failed')) {
-         // It exists, merge it
-         db.run("UPDATE messages SET chat_id = '557591167094@c.us' WHERE chat_id LIKE '%105403295727623%'");
-         db.run("UPDATE OR IGNORE chat_tags SET chat_id = '557591167094@c.us' WHERE chat_id LIKE '%105403295727623%'");
-         db.run("DELETE FROM chats WHERE id LIKE '%105403295727623%'");
-      }
-    });
-
-    db.all("SELECT id, name, phone FROM chats", async (err, rows: any[]) => {
-      if (err) return res.status(500).json({ error: err.message });
-      let fixed = 0;
-
-      for (const row of rows) {
-        if (row.id.includes('@lid') || (row.phone && row.phone.length > 14)) {
-          let resolvedInfo = await waClient.pupPage.evaluate(async (lidJid) => {
-            let debugLogs = [`[Repair] Evaluating LID: ${lidJid}`];
-            try {
-              const w = window as any;
-              if (w.Store && w.Store.Contact) {
-                const all = w.Store.Contact.getModelsArray();
-                debugLogs.push(`Total contacts in Store.Contact: ${all.length}`);
-                
-                // Method 1: Find c.us contact with matching lidJid
-                const real = all.find((c: any) => c.id && c.id.server === 'c.us' && c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]);
-                if (real && real.id && real.id.user) {
-                  debugLogs.push(`FOUND real c.us contact via c.lidJid: ${real.id.user}`);
-                  return { phone: real.id.user, name: real.verifiedName || real.name || real.pushname || real.displayName, logs: debugLogs };
-                }
-
-                // Debug properties of the lidContact itself
-                const lidContact = w.Store.Contact.get(lidJid);
-                if (lidContact) {
-                  debugLogs.push(`Found lidContact directly. Keys: ${Object.keys(lidContact).join(', ')}`);
-                  debugLogs.push(`lidContact.id: ${JSON.stringify(lidContact.id)}`);
-                  // Try to see if it has other helpful properties
-                  debugLogs.push(`lidContact.phoneNumber: ${JSON.stringify(lidContact.phoneNumber)}`);
-                  debugLogs.push(`lidContact.isBusiness: ${lidContact.isBusiness}`);
-                  debugLogs.push(`lidContact.isEnterprise: ${lidContact.isEnterprise}`);
-                  // Sometimes phoneNumber is actually an object or string
-                  if (lidContact.phoneNumber && typeof lidContact.phoneNumber === 'string') {
-                    const extractedPhone = lidContact.phoneNumber.split('@')[0];
-                    debugLogs.push(`extracted from phoneNumber string: ${extractedPhone}`);
-                    // Return it
-                    return {
-                       phone: extractedPhone,
-                       name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName,
-                       logs: debugLogs
-                    };
-                  }
-                  if (lidContact.phoneNumber && lidContact.phoneNumber.user) {
-                     debugLogs.push(`extracted from phoneNumber object: ${lidContact.phoneNumber.user}`);
-                     return {
-                       phone: lidContact.phoneNumber.user,
-                       name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName,
-                       logs: debugLogs
-                     };
-                  }
-
-                  return {
-                    phone: null, // do not use lidContact.phoneNumber blindly
-                    name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName,
-                    logs: debugLogs
-                  };
-                } else {
-                  debugLogs.push(`lidContact NOT found directly.`)
-                }
-              } else {
-                debugLogs.push('w.Store or w.Store.Contact missing');
-              }
-            } catch(e: any) {
-              debugLogs.push(`Error in evaluate: ${e.message}`);
-            }
-            return { phone: null, name: null, logs: debugLogs };
-          }, row.id);
-          
-          console.log(`\n============== LID RESOLUTION DEBUG ==============`);
-          console.log((resolvedInfo.logs || []).join('\n'));
-          console.log(`[LID Resolution Output] phone: ${resolvedInfo.phone}, name: ${resolvedInfo.name}`);
-          console.log(`================================================\n`);
-          
-          let resolvedPhone = resolvedInfo.phone;
-          let resolvedName = resolvedInfo.name;
-
-          if (!resolvedPhone && (row.id.includes('105403295727623') || row.phone === '105403295727623')) {
-            resolvedPhone = '557591167094';
-          }
-
-          if (resolvedPhone || resolvedName) {
-            const newId = resolvedPhone ? `${resolvedPhone}@c.us` : row.id;
-            let newPhone = resolvedPhone || row.phone;
-            
-            // If the phone is still a LID string (same as the @lid id), clear it
-            if (!resolvedPhone && newPhone === row.id.split('@')[0] && row.id.includes('@lid')) {
-              newPhone = '';
-            }
-
-            if (row.id !== newId || resolvedName || newPhone !== row.phone) {
-              await new Promise<void>((resolve) => {
-                let currentName = row.name;
-                if (resolvedName && (currentName === row.phone || currentName === row.id.split('@')[0])) {
-                   currentName = resolvedName;
-                } else if (!resolvedName && (currentName === row.phone || currentName === row.id.split('@')[0])) {
-                   currentName = newPhone;
-                }
-                db.run("UPDATE chats SET id = ?, phone = ?, name = ? WHERE id = ?", [newId, newPhone, currentName, row.id], (err) => {
-                  if (err && err.message.includes('UNIQUE constraint failed')) {
-                     // conflict, we just update messages and tags then delete
-                     db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
-                     db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
-                     db.run("DELETE FROM chats WHERE id = ?", [row.id]);
-                  } else if (newId !== row.id) {
-                     db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
-                     db.run("UPDATE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
-                  }
-                  fixed++;
-                  resolve();
-                });
-              });
-            }
-          }
-        }
-      }
-      res.json({ success: true, fixed });
     });
   });
 
@@ -1192,10 +1134,8 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         }
 
         for (const row of rows) {
-          if (row.id && row.id !== '0@c.us' && !row.id.startsWith('0@')) {
-             await syncChatProfilePic(row.id);
-             await new Promise(resolve => setTimeout(resolve, 1000));
-          }
+          await syncChatProfilePic(row.id);
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       });
     });
@@ -1226,83 +1166,10 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       const chat = await msg.getChat();
       if (chat.isGroup) return; // Ignore groups for now
 
-      let rawChatId = chat.id._serialized;
-      let contact = await chat.getContact();
-      let name = (contact as any).verifiedName || contact.name || contact.pushname || contact.number;
-      let phone = contact.number;
-      let chatId = rawChatId;
-
-      if (rawChatId.includes('@lid') || (phone && phone.length > 14)) {
-        const resolvedInfo = await waClient.pupPage.evaluate(async (lidJid) => {
-          let debugLogs = [`[Message handler] Evaluating LID: ${lidJid}`];
-          try {
-            const w = window as any;
-            if (w.Store && w.Store.Contact) {
-              const all = w.Store.Contact.getModelsArray();
-              debugLogs.push(`Total contacts in Store.Contact: ${all.length}`);
-              const real = all.find((c: any) => c.id && c.id.server === 'c.us' && c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]);
-              if (real && real.id && real.id.user) {
-                debugLogs.push(`FOUND real c.us contact via c.lidJid: ${real.id.user}`);
-                return { phone: real.id.user, name: real.verifiedName || real.name || real.pushname || real.displayName, logs: debugLogs };
-              }
-              const lidContact = w.Store.Contact.get(lidJid);
-              if (lidContact) {
-                debugLogs.push(`Found lidContact directly. Keys: ${Object.keys(lidContact).join(', ')}`);
-                debugLogs.push(`lidContact.id: ${JSON.stringify(lidContact.id)}`);
-                debugLogs.push(`lidContact.phoneNumber: ${JSON.stringify(lidContact.phoneNumber)}`);
-                
-                if (lidContact.phoneNumber && typeof lidContact.phoneNumber === 'string') {
-                  const extractedPhone = lidContact.phoneNumber.split('@')[0];
-                  debugLogs.push(`extracted from phoneNumber string: ${extractedPhone}`);
-                  return {
-                     phone: extractedPhone,
-                     name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName,
-                     logs: debugLogs
-                  };
-                }
-                if (lidContact.phoneNumber && lidContact.phoneNumber.user) {
-                   debugLogs.push(`extracted from phoneNumber object: ${lidContact.phoneNumber.user}`);
-                   return {
-                     phone: lidContact.phoneNumber.user,
-                     name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName,
-                     logs: debugLogs
-                   };
-                }
-
-                return {
-                  phone: null, // do not use lidContact.phoneNumber
-                  name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName,
-                  logs: debugLogs
-                };
-              }
-            }
-          } catch(e: any) {
-            debugLogs.push(`Error: ${e.message}`);
-          }
-          return { phone: null, name: null, logs: debugLogs };
-        }, rawChatId);
-
-        console.log(`\n============== LID RESOLUTION DEBUG ==============`);
-        console.log((resolvedInfo.logs || []).join('\n'));
-        console.log(`[LID Resolution Output] phone: ${resolvedInfo.phone}, name: ${resolvedInfo.name}`);
-        console.log(`================================================\n`);
-
-        if (resolvedInfo) {
-          if (resolvedInfo.phone) {
-            phone = resolvedInfo.phone;
-            chatId = `${phone}@c.us`; 
-          } else if (phone === rawChatId.split('@')[0] && rawChatId.includes('@lid')) {
-            phone = ''; // Do NOT save the raw LID string as a phone number
-          }
-          if (resolvedInfo.name && name === contact.number) {
-            name = resolvedInfo.name; // Keep the verified name instead of LID
-          }
-          if (name === contact.number) {
-            name = phone; // Ensure name is at least the correct phone if name is missing
-          }
-        }
-      }
-
+      const chatId = chat.id._serialized;
+      const contact = await chat.getContact();
+      const name = contact.name || contact.pushname || contact.number;
+      const phone = contact.number;
       let body = msg.body;
       const timestamp = msg.timestamp * 1000;
       const fromMe = msg.fromMe ? 1 : 0;
@@ -1312,7 +1179,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       let mediaName = null;
       let transcription = null;
 
-      if (msg.hasMedia && msg.type !== 'interactive' && msg.type !== 'interactive_response') {
+      if (msg.hasMedia) {
         try {
           const media = await msg.downloadMedia();
           if (media) {
@@ -1347,12 +1214,8 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               }
             }
           }
-        } catch (err: any) {
-          if (err && err.message && err.message.includes('webMediaType is invalid')) {
-            // Silently ignore interactive/unsupported media types
-          } else {
-            console.error('Error downloading media:', err);
-          }
+        } catch (err) {
+          console.error('Error downloading media:', err);
         }
       }
 
@@ -1379,7 +1242,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       db.get("SELECT id FROM messages WHERE id = ?", [msg.id.id], (err, row) => {
         if (row) return; // Message already processed
 
-        db.get("SELECT id, profile_pic FROM chats WHERE id = ? OR id = ? OR (phone = ? AND phone IS NOT NULL AND phone != '')", [chatId, rawChatId, phone], (err, chatRow: any) => {
+        db.get("SELECT id, profile_pic FROM chats WHERE id = ? OR (phone = ? AND phone IS NOT NULL AND phone != '')", [chatId, phone], (err, chatRow: any) => {
           if (!chatRow) {
             // New chat, put in first column
             db.get("SELECT id FROM columns ORDER BY position ASC LIMIT 1", (err, colRow: any) => {
@@ -1411,25 +1274,22 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
                 });
               }
               
+              let finalName = chatRow.name;
+              if ((chatRow.name === chatId || chatRow.name === phone || chatRow.name === '') && name !== chatId && name !== phone && name !== '') {
+                finalName = name;
+              }
+
               db.run(`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?, name = ?, last_message_from_me = ?${unreadUpdate} WHERE id = ?`,
-                [displayBody, timestamp, finalProfilePic, name, fromMe, chatId], () => {
-                  io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name, last_message_from_me: fromMe });
+                [displayBody, timestamp, finalProfilePic, finalName, fromMe, chatId], () => {
+                  io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name: finalName, last_message_from_me: fromMe });
                 });
             });
           }
         });
 
         // Save message
-        db.run("INSERT OR IGNORE INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name, transcription) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [msg.id.id, chatId, body, fromMe, timestamp, mediaUrl, mediaType, mediaName, transcription], async function(this: any, err: any) {
-            if (err) {
-              console.error("Error inserting message:", err);
-              return;
-            }
-            if (this.changes === 0) {
-              // Message already existed, so we don't emit a new message event again
-              return;
-            }
+        db.run("INSERT INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name, transcription) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [msg.id.id, chatId, body, fromMe, timestamp, mediaUrl, mediaType, mediaName, transcription], async () => {
             io.emit('new_message', { id: msg.id.id, chat_id: chatId, body, from_me: fromMe, timestamp, media_url: mediaUrl, media_type: mediaType, media_name: mediaName, transcription });
             
             // Check if message is from the specific number and not from me
