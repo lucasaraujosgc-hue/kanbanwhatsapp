@@ -1182,87 +1182,57 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       let chatId = rawChatId;
 
       // Resolução de LID: quando o chatId ou phone não é um número real de telefone,
-      // busca o número real via Store.Contact no Puppeteer.
+      // usa waClient.getContactById() com o @lid para obter o contato real @c.us.
       // LIDs numéricos têm 14+ dígitos; números BR reais têm no máximo 13 (55+DDD+9dig).
       const phonePareceLid = !phone || phone.length > 13 || !/^[1-9]\d{7,13}$/.test(phone);
       if (rawChatId.includes('@lid') || phonePareceLid) {
-        const resolvedInfo = await waClient.pupPage.evaluate(async (lidJid, numericLid) => {
-          try {
-            const w = window as any;
-            if (w.Store && w.Store.Contact) {
-              const all = w.Store.Contact.getModelsArray();
+        try {
+          // Tenta resolver via getContactById passando o @lid diretamente
+          const lidContact = await waClient.getContactById(rawChatId.includes('@lid') ? rawChatId : `${phone}@lid`);
+          if (lidContact && lidContact.number && lidContact.number.length <= 13) {
+            phone = lidContact.number;
+            chatId = `${phone}@c.us`;
+            name = (lidContact as any).verifiedName || lidContact.name || lidContact.pushname || phone;
+          } else {
+            // Fallback: busca via pupPage no Store.Contact
+            const resolvedInfo = await waClient.pupPage.evaluate(async (lidJid) => {
+              try {
+                const w = window as any;
+                if (w.Store && w.Store.Contact) {
+                  const all = w.Store.Contact.getModelsArray();
 
-              // Estratégia 1: busca pelo lidJid (quando rawChatId é @lid)
-              const byLid = all.find((c: any) =>
-                c.id && c.id.server === 'c.us' &&
-                c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]
-              );
-              if (byLid && byLid.id && byLid.id.user) {
-                return { phone: byLid.id.user, name: byLid.verifiedName || byLid.name || byLid.pushname || byLid.displayName };
-              }
-
-              // Estratégia 2: busca pelo número LID numérico no campo id.user ou lidJid
-              if (numericLid) {
-                // Primeiro: acha o contato cujo id.user é o LID numérico
-                const lidEntry = all.find((c: any) =>
-                  (c.id && c.id.user === numericLid) ||
-                  (c.lidJid && c.lidJid.split('@')[0] === numericLid)
-                );
-                if (lidEntry) {
-                  // Se ele tem lidJid, busca o @c.us correspondente
-                  if (lidEntry.lidJid) {
-                    const linked = all.find((c: any) =>
-                      c.id && c.id.server === 'c.us' &&
-                      c.lidJid && c.lidJid.split('@')[0] === lidEntry.lidJid.split('@')[0]
-                    );
-                    if (linked && linked.id && linked.id.user) {
-                      return { phone: linked.id.user, name: linked.verifiedName || linked.name || linked.pushname || linked.displayName };
-                    }
+                  // Busca quem tem esse lid como lidJid e é @c.us
+                  const byLid = all.find((c: any) =>
+                    c.id && c.id.server === 'c.us' &&
+                    c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]
+                  );
+                  if (byLid && byLid.id && byLid.id.user) {
+                    return { phone: byLid.id.user, name: byLid.verifiedName || byLid.name || byLid.pushname };
                   }
-                  // Tenta phoneNumber direto no próprio lidEntry
-                  if (lidEntry.phoneNumber) {
+
+                  // Busca quem tem esse lid no próprio id (e tem phoneNumber)
+                  const lidEntry = w.Store.Contact.get(lidJid);
+                  if (lidEntry && lidEntry.phoneNumber) {
                     return {
                       phone: lidEntry.phoneNumber.replace(/[^0-9]/g, ''),
                       name: lidEntry.verifiedName || lidEntry.name || lidEntry.pushname
                     };
                   }
                 }
+              } catch(e) {}
+              return { phone: null, name: null };
+            }, rawChatId.includes('@lid') ? rawChatId : `${phone}@lid`);
 
-                // Estratégia 2b: varre todos procurando quem tem esse numericLid como lidJid user
-                const byLidUser = all.find((c: any) =>
-                  c.id && c.id.server === 'c.us' &&
-                  c.id.user && c.lidJid &&
-                  c.lidJid.split('@')[0] === numericLid
-                );
-                if (byLidUser && byLidUser.id && byLidUser.id.user) {
-                  return { phone: byLidUser.id.user, name: byLidUser.verifiedName || byLidUser.name || byLidUser.pushname };
-                }
-              }
-
-              // Estratégia 3: Store.Contact.get direto
-              const lidContact = w.Store.Contact.get(lidJid);
-              if (lidContact) {
-                return {
-                  phone: lidContact.phoneNumber ? lidContact.phoneNumber.replace(/[^0-9]/g, '') : null,
-                  name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
-                };
-              }
+            if (resolvedInfo && resolvedInfo.phone && resolvedInfo.phone.length <= 13) {
+              phone = resolvedInfo.phone;
+              chatId = `${phone}@c.us`;
+              if (resolvedInfo.name) name = resolvedInfo.name;
+            } else {
+              console.warn(`[LID] Não foi possível resolver: rawChatId=${rawChatId}, phone=${phone}`);
             }
-          } catch(e) { console.error('LID resolve error:', e); }
-          return { phone: null, name: null };
-        }, rawChatId, phonePareceLid ? phone : null);
-
-        if (resolvedInfo && resolvedInfo.phone) {
-          phone = resolvedInfo.phone;
-          chatId = `${phone}@c.us`;
-          if (resolvedInfo.name) {
-            name = resolvedInfo.name;
-          } else if (!name || name === contact.number || phonePareceLid) {
-            name = phone;
           }
-        } else if (!resolvedInfo || !resolvedInfo.phone) {
-          // Resolução falhou: loga para diagnóstico
-          console.warn(`[LID] Não foi possível resolver: rawChatId=${rawChatId}, phone=${phone}`);
+        } catch (lidErr) {
+          console.warn(`[LID] Erro ao resolver via getContactById: rawChatId=${rawChatId}`, lidErr);
         }
       }
 
