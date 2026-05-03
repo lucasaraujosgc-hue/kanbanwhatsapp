@@ -1175,56 +1175,71 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       const chat = await msg.getChat();
       if (chat.isGroup) return; // Ignore groups for now
 
-      // O WhatsApp passa @lid tanto no chat.id quanto no msg.from para esses contatos.
-      // A única fonte confiável do número real é msg.id.remote quando vem como @c.us,
-      // ou então buscamos via chat.getContact() e forçamos o chatId correto.
       const rawChatId = chat.id._serialized;
+      const isRealPhone = (s: string) => !!s && /^[0-9]+$/.test(s) && s.length >= 8 && s.length <= 13;
 
       let contact = await chat.getContact();
       let name = (contact as any).verifiedName || contact.name || contact.pushname || contact.number;
-
-      // Tenta extrair o número real de múltiplas fontes
-      let phone: string = '';
+      let phone: string = contact.number || '';
       let chatId: string = rawChatId;
 
-      // Fonte 1: msg.id.remote (o JID remoto da mensagem)
-      const msgRemote: string = (msg as any).id?.remote?._serialized || (msg as any).id?.remote || '';
-      // Fonte 2: contact.number
-      const contactNumber: string = contact.number || '';
-
-      // Usa a primeira fonte que seja um número real (<=13 dígitos, só números)
-      const isRealPhone = (s: string) => s && /^[0-9]+$/.test(s) && s.length <= 13 && s.length >= 8;
-
-      if (isRealPhone(contactNumber)) {
-        phone = contactNumber;
-        chatId = msgRemote.includes('@c.us') ? msgRemote : `${phone}@c.us`;
-      } else if (msgRemote.includes('@c.us') && isRealPhone(msgRemote.split('@')[0])) {
-        phone = msgRemote.split('@')[0];
-        chatId = msgRemote;
-      } else {
-        // Último recurso: tenta via pupPage buscando pelo chat diretamente
-        const resolved = await waClient.pupPage.evaluate(async (lidJid) => {
+      if (!isRealPhone(phone) || rawChatId.includes('@lid')) {
+        // Busca o número real via Store.Chat -> formattedTitle / phoneNumber / linkedJid
+        const resolved = await waClient.pupPage.evaluate((lidJid) => {
           try {
             const w = window as any;
-            if (!w.Store?.Chat) return null;
-            const chatObj = w.Store.Chat.get(lidJid);
-            if (!chatObj) return null;
-            // Tenta contact associado ao chat
-            const c = chatObj.contact;
-            if (c?.phoneNumber) return { phone: c.phoneNumber.replace(/[^0-9]/g, ''), name: c.verifiedName || c.name || c.pushname };
-            if (c?.id?.server === 'c.us') return { phone: c.id.user, name: c.verifiedName || c.name || c.pushname };
-          } catch(e) {}
-          return null;
+            const stores = w.Store || {};
+
+            // Tenta achar via Chat store
+            const chatObj = stores.Chat?.get(lidJid);
+            if (chatObj) {
+              // formattedTitle costuma ter o número formatado ex: +55 75 81949414
+              const title: string = chatObj.formattedTitle || chatObj.contact?.formattedTitle || '';
+              const digitsOnly = title.replace(/[^0-9]/g, '');
+              if (digitsOnly.length >= 8 && digitsOnly.length <= 13) {
+                return { phone: digitsOnly, name: chatObj.contact?.verifiedName || chatObj.contact?.name || chatObj.contact?.pushname || null };
+              }
+
+              // Tenta phoneNumber direto
+              const pn: string = chatObj.contact?.phoneNumber || chatObj.phoneNumber || '';
+              const pnDigits = pn.replace(/[^0-9]/g, '');
+              if (pnDigits.length >= 8 && pnDigits.length <= 13) {
+                return { phone: pnDigits, name: chatObj.contact?.verifiedName || chatObj.contact?.name || null };
+              }
+
+              // Tenta linkedJid (o @c.us real vinculado ao @lid)
+              const linked: string = chatObj.contact?.linkedJid || chatObj.linkedJid || chatObj.contact?.jid || '';
+              if (linked.includes('@c.us')) {
+                return { phone: linked.split('@')[0], name: chatObj.contact?.verifiedName || chatObj.contact?.name || null };
+              }
+
+              // Dump para diagnóstico se nada funcionou
+              const c = chatObj.contact || {};
+              return {
+                phone: null,
+                debug: JSON.stringify({
+                  keys: Object.keys(c).slice(0, 30),
+                  formattedTitle: c.formattedTitle,
+                  phoneNumber: c.phoneNumber,
+                  linkedJid: c.linkedJid,
+                  jid: c.jid,
+                  lid: c.lid,
+                  id: c.id ? { user: c.id.user, server: c.id.server } : null,
+                })
+              };
+            }
+            return { phone: null, debug: 'chat not found in Store.Chat' };
+          } catch(e: any) {
+            return { phone: null, debug: String(e) };
+          }
         }, rawChatId);
 
-        if (resolved && isRealPhone(resolved.phone)) {
+        if (resolved?.phone && isRealPhone(resolved.phone)) {
           phone = resolved.phone;
           chatId = `${phone}@c.us`;
           if (resolved.name) name = resolved.name;
         } else {
-          phone = rawChatId.split('@')[0];
-          chatId = rawChatId;
-          console.warn(`[LID] Não resolvido: rawChatId=${rawChatId}, contactNumber=${contactNumber}, msgRemote=${msgRemote}`);
+          console.warn(`[LID] Não resolvido: rawChatId=${rawChatId}, debug=${(resolved as any)?.debug}`);
         }
       }
 
