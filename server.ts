@@ -132,15 +132,13 @@ db.serialize(() => {
   // Hotfix migration for LIDs to correct the specific missing contact
   // Hotfix migration for LIDs to correct the specific missing contact
   // We use INSERT OR REPLACE for chats and then delete the old one to avoid UNIQUE constraint failed if the c.us chat already exists.
-  db.get("SELECT * FROM chats WHERE id LIKE '%105403295727623%' OR phone LIKE '%105403295727623%'", (err, row: any) => {
-    if (row && row.id !== '557591167094@c.us') {
-      let currentName = row.name;
-      if (currentName === '105403295727623') currentName = '557591167094';
-      db.run("INSERT OR REPLACE INTO chats (id, name, phone, column_id, last_message, last_message_time, unread_count, profile_pic, last_message_from_me) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ['557591167094@c.us', currentName, '557591167094', row.column_id, row.last_message, row.last_message_time, row.unread_count, row.profile_pic, row.last_message_from_me], () => {
+  db.get("SELECT id FROM chats WHERE id = '557591167094@c.us'", (err, existing: any) => {
+    if (!existing) {
+      db.get("SELECT * FROM chats WHERE id LIKE '%105403295727623%'", (err, row: any) => {
+        if (row) {
+          db.run("UPDATE chats SET id = '557591167094@c.us', phone = '557591167094' WHERE id = ?", [row.id]);
           db.run("UPDATE messages SET chat_id = '557591167094@c.us' WHERE chat_id = ?", [row.id]);
           db.run("UPDATE OR IGNORE chat_tags SET chat_id = '557591167094@c.us' WHERE chat_id = ?", [row.id]);
-          db.run("DELETE FROM chats WHERE id = ?", [row.id]);
         }
       );
     }
