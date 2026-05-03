@@ -391,7 +391,14 @@ export default function App() {
       ]);
       
       setColumns(await colsRes.json());
-      const newChats = await chatsRes.json();
+      const rawChats = await chatsRes.json();
+      const newChats = rawChats.map((c: any) => {
+        let name = c.name;
+        let phone = c.phone;
+        if (phone && (phone.includes('lid') || phone.includes('lib'))) phone = '';
+        if (name && (name.includes('lid') || name.includes('lib'))) name = phone;
+        return { ...c, name, phone };
+      });
       setChats(newChats);
       setTags(await tagsRes.json());
       

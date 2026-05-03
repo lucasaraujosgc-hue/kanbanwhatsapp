@@ -140,6 +140,15 @@ db.serialize(() => {
       stmt.finalize();
     }
   });
+
+  // Automatically adjust the database to remove 'lib' or 'lid' strings from phone numbers
+  db.run("UPDATE chats SET phone = '' WHERE phone LIKE '%lid%' OR phone LIKE '%lib%'", (err) => {
+    if (!err) console.log("Database adjusted: cleaned up messy 'lid' phone numbers.");
+  });
+
+  db.run("UPDATE chats SET name = phone WHERE name LIKE '%lid%' OR name LIKE '%lib%'", (err) => {
+    if (!err) console.log("Database adjusted: cleaned up messy 'lid' names.");
+  });
 });
 
 async function startServer() {
@@ -1071,8 +1080,12 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
       const chatId = chat.id._serialized;
       const contact = await chat.getContact();
-      const name = contact.name || contact.pushname || contact.number;
-      const phone = contact.number;
+      let name = contact.name || contact.pushname || contact.number;
+      let phone = contact.number;
+      
+      if (phone && (phone.includes('lid') || phone.includes('lib'))) phone = '';
+      if (name && (name.includes('lid') || name.includes('lib'))) name = '';
+
       let body = msg.body;
       const timestamp = msg.timestamp * 1000;
       const fromMe = msg.fromMe ? 1 : 0;
@@ -1145,15 +1158,17 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       db.get("SELECT id FROM messages WHERE id = ?", [msg.id.id], (err, row) => {
         if (row) return; // Message already processed
 
-        db.get("SELECT id, profile_pic FROM chats WHERE id = ? OR (phone = ? AND phone IS NOT NULL AND phone != '')", [chatId, phone], (err, chatRow: any) => {
+        db.get("SELECT id, profile_pic, name FROM chats WHERE id = ? OR (phone = ? AND phone IS NOT NULL AND phone != '')", [chatId, phone], (err, chatRow: any) => {
+          const finalName = name || (chatRow ? chatRow.name : '');
+          
           if (!chatRow) {
             // New chat, put in first column
             db.get("SELECT id FROM columns ORDER BY position ASC LIMIT 1", (err, colRow: any) => {
               const colId = colRow ? colRow.id : 'col-1';
               const unreadCount = fromMe ? 0 : 1;
               db.run("INSERT INTO chats (id, name, phone, column_id, last_message, last_message_time, unread_count, profile_pic, last_message_from_me) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [chatId, name, phone, colId, displayBody, timestamp, unreadCount, profilePic, fromMe], () => {
-                  io.emit('new_chat', { id: chatId, name, phone, column_id: colId, last_message: displayBody, last_message_time: timestamp, unread_count: unreadCount, profile_pic: profilePic, last_message_from_me: fromMe });
+                [chatId, finalName, phone, colId, displayBody, timestamp, unreadCount, profilePic, fromMe], () => {
+                  io.emit('new_chat', { id: chatId, name: finalName, phone, column_id: colId, last_message: displayBody, last_message_time: timestamp, unread_count: unreadCount, profile_pic: profilePic, last_message_from_me: fromMe });
                 });
             });
           } else {
@@ -1178,8 +1193,8 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               }
               
               db.run(`UPDATE chats SET last_message = ?, last_message_time = ?, profile_pic = ?, name = ?, last_message_from_me = ?${unreadUpdate} WHERE id = ?`,
-                [displayBody, timestamp, finalProfilePic, name, fromMe, chatId], () => {
-                  io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name, last_message_from_me: fromMe });
+                [displayBody, timestamp, finalProfilePic, finalName, fromMe, chatId], () => {
+                  io.emit('chat_updated', { id: chatId, last_message: displayBody, last_message_time: timestamp, profile_pic: finalProfilePic, name: finalName, last_message_from_me: fromMe });
                 });
             });
           }
