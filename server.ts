@@ -1175,20 +1175,46 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       const chat = await msg.getChat();
       if (chat.isGroup) return; // Ignore groups for now
 
-      const rawChatId = chat.id._serialized;
-      const isRealPhone = (s: string) => !!s && /^[0-9]+$/.test(s) && s.length >= 8 && s.length <= 13;
-
+      let rawChatId = chat.id._serialized;
       let contact = await chat.getContact();
       let name = (contact as any).verifiedName || contact.name || contact.pushname || contact.number;
-      let phone: string = contact.number || '';
-      let chatId: string = rawChatId;
+      let phone = contact.number;
+      let chatId = rawChatId;
 
-      // Se o chatId veio como @lid, força para @c.us usando o número LID como user.
-      // Isso garante que a conversa seja salva/encontrada consistentemente como @c.us.
-      if (rawChatId.includes('@lid')) {
-        const lidUser = rawChatId.split('@')[0];
-        chatId = `${lidUser}@c.us`;
-        phone = lidUser;
+      if (rawChatId.includes('@lid') || (phone && phone.length > 14)) {
+        const resolvedInfo = await waClient.pupPage.evaluate(async (lidJid) => {
+          try {
+            const w = window as any;
+            if (w.Store && w.Store.Contact) {
+              const all = w.Store.Contact.getModelsArray();
+              const real = all.find((c: any) => c.id && c.id.server === 'c.us' && c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]);
+              if (real && real.id && real.id.user) {
+                return { phone: real.id.user, name: real.verifiedName || real.name || real.pushname || real.displayName };
+              }
+              const lidContact = w.Store.Contact.get(lidJid);
+              if (lidContact) {
+                return {
+                  phone: lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null,
+                  name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
+                };
+              }
+            }
+          } catch(e) {}
+          return { phone: null, name: null };
+        }, rawChatId);
+
+        if (resolvedInfo) {
+          if (resolvedInfo.phone) {
+            phone = resolvedInfo.phone;
+            chatId = `${phone}@c.us`; 
+          }
+          if (resolvedInfo.name && name === contact.number) {
+            name = resolvedInfo.name; // Keep the verified name instead of LID
+          }
+          if (name === contact.number) {
+            name = phone; // Ensure name is at least the correct phone if name is missing
+          }
+        }
       }
 
       let body = msg.body;
