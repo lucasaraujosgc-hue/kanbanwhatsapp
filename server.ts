@@ -1275,6 +1275,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
           }
         } else if (phone && phone.length > 14) {
             phone = null as any;
+        }
       }
 
       // Important: Use the resolved phone number for the chatId if it was a LID
