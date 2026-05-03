@@ -1011,25 +1011,70 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       for (const row of rows) {
         if (row.id.includes('@lid') || (row.phone && row.phone.length > 14)) {
           let resolvedInfo = await waClient.pupPage.evaluate(async (lidJid) => {
+            let debugLogs = [`[Repair] Evaluating LID: ${lidJid}`];
             try {
               const w = window as any;
               if (w.Store && w.Store.Contact) {
                 const all = w.Store.Contact.getModelsArray();
+                debugLogs.push(`Total contacts in Store.Contact: ${all.length}`);
+                
+                // Method 1: Find c.us contact with matching lidJid
                 const real = all.find((c: any) => c.id && c.id.server === 'c.us' && c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]);
                 if (real && real.id && real.id.user) {
-                  return { phone: real.id.user, name: real.verifiedName || real.name || real.pushname || real.displayName };
+                  debugLogs.push(`FOUND real c.us contact via c.lidJid: ${real.id.user}`);
+                  return { phone: real.id.user, name: real.verifiedName || real.name || real.pushname || real.displayName, logs: debugLogs };
                 }
+
+                // Debug properties of the lidContact itself
                 const lidContact = w.Store.Contact.get(lidJid);
                 if (lidContact) {
+                  debugLogs.push(`Found lidContact directly. Keys: ${Object.keys(lidContact).join(', ')}`);
+                  debugLogs.push(`lidContact.id: ${JSON.stringify(lidContact.id)}`);
+                  // Try to see if it has other helpful properties
+                  debugLogs.push(`lidContact.phoneNumber: ${JSON.stringify(lidContact.phoneNumber)}`);
+                  debugLogs.push(`lidContact.isBusiness: ${lidContact.isBusiness}`);
+                  debugLogs.push(`lidContact.isEnterprise: ${lidContact.isEnterprise}`);
+                  // Sometimes phoneNumber is actually an object or string
+                  if (lidContact.phoneNumber && typeof lidContact.phoneNumber === 'string') {
+                    const extractedPhone = lidContact.phoneNumber.split('@')[0];
+                    debugLogs.push(`extracted from phoneNumber string: ${extractedPhone}`);
+                    // Return it
+                    return {
+                       phone: extractedPhone,
+                       name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName,
+                       logs: debugLogs
+                    };
+                  }
+                  if (lidContact.phoneNumber && lidContact.phoneNumber.user) {
+                     debugLogs.push(`extracted from phoneNumber object: ${lidContact.phoneNumber.user}`);
+                     return {
+                       phone: lidContact.phoneNumber.user,
+                       name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName,
+                       logs: debugLogs
+                     };
+                  }
+
                   return {
-                    phone: null, // do not use lidContact.phoneNumber
-                    name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
+                    phone: null, // do not use lidContact.phoneNumber blindly
+                    name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName,
+                    logs: debugLogs
                   };
+                } else {
+                  debugLogs.push(`lidContact NOT found directly.`)
                 }
+              } else {
+                debugLogs.push('w.Store or w.Store.Contact missing');
               }
-            } catch(e) {}
-            return { phone: null, name: null };
+            } catch(e: any) {
+              debugLogs.push(`Error in evaluate: ${e.message}`);
+            }
+            return { phone: null, name: null, logs: debugLogs };
           }, row.id);
+          
+          console.log(`\n============== LID RESOLUTION DEBUG ==============`);
+          console.log((resolvedInfo.logs || []).join('\n'));
+          console.log(`[LID Resolution Output] phone: ${resolvedInfo.phone}, name: ${resolvedInfo.name}`);
+          console.log(`================================================\n`);
           
           let resolvedPhone = resolvedInfo.phone;
           let resolvedName = resolvedInfo.name;
@@ -1189,25 +1234,58 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
       if (rawChatId.includes('@lid') || (phone && phone.length > 14)) {
         const resolvedInfo = await waClient.pupPage.evaluate(async (lidJid) => {
+          let debugLogs = [`[Message handler] Evaluating LID: ${lidJid}`];
           try {
             const w = window as any;
             if (w.Store && w.Store.Contact) {
               const all = w.Store.Contact.getModelsArray();
+              debugLogs.push(`Total contacts in Store.Contact: ${all.length}`);
               const real = all.find((c: any) => c.id && c.id.server === 'c.us' && c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]);
               if (real && real.id && real.id.user) {
-                return { phone: real.id.user, name: real.verifiedName || real.name || real.pushname || real.displayName };
+                debugLogs.push(`FOUND real c.us contact via c.lidJid: ${real.id.user}`);
+                return { phone: real.id.user, name: real.verifiedName || real.name || real.pushname || real.displayName, logs: debugLogs };
               }
               const lidContact = w.Store.Contact.get(lidJid);
               if (lidContact) {
+                debugLogs.push(`Found lidContact directly. Keys: ${Object.keys(lidContact).join(', ')}`);
+                debugLogs.push(`lidContact.id: ${JSON.stringify(lidContact.id)}`);
+                debugLogs.push(`lidContact.phoneNumber: ${JSON.stringify(lidContact.phoneNumber)}`);
+                
+                if (lidContact.phoneNumber && typeof lidContact.phoneNumber === 'string') {
+                  const extractedPhone = lidContact.phoneNumber.split('@')[0];
+                  debugLogs.push(`extracted from phoneNumber string: ${extractedPhone}`);
+                  return {
+                     phone: extractedPhone,
+                     name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName,
+                     logs: debugLogs
+                  };
+                }
+                if (lidContact.phoneNumber && lidContact.phoneNumber.user) {
+                   debugLogs.push(`extracted from phoneNumber object: ${lidContact.phoneNumber.user}`);
+                   return {
+                     phone: lidContact.phoneNumber.user,
+                     name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName,
+                     logs: debugLogs
+                   };
+                }
+
                 return {
                   phone: null, // do not use lidContact.phoneNumber
-                  name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
+                  name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName,
+                  logs: debugLogs
                 };
               }
             }
-          } catch(e) {}
-          return { phone: null, name: null };
+          } catch(e: any) {
+            debugLogs.push(`Error: ${e.message}`);
+          }
+          return { phone: null, name: null, logs: debugLogs };
         }, rawChatId);
+
+        console.log(`\n============== LID RESOLUTION DEBUG ==============`);
+        console.log((resolvedInfo.logs || []).join('\n'));
+        console.log(`[LID Resolution Output] phone: ${resolvedInfo.phone}, name: ${resolvedInfo.name}`);
+        console.log(`================================================\n`);
 
         if (resolvedInfo) {
           if (resolvedInfo.phone) {
