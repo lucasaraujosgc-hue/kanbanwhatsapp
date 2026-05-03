@@ -1008,37 +1008,52 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
       for (const row of rows) {
         if (row.id.includes('@lid') || (row.phone && row.phone.length > 14)) {
-          let resolvedPhone = await waClient.pupPage.evaluate(async (lidJid) => {
+          let resolvedInfo = await waClient.pupPage.evaluate(async (lidJid) => {
             try {
               const w = window as any;
               if (w.Store && w.Store.Contact) {
                 const all = w.Store.Contact.getModelsArray();
                 const real = all.find((c: any) => c.id && c.id.server === 'c.us' && c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]);
-                return real?.id?.user ?? null;
+                if (real && real.id && real.id.user) {
+                  return { phone: real.id.user, name: real.verifiedName || real.name || real.pushname || real.displayName };
+                }
+                const lidContact = w.Store.Contact.get(lidJid);
+                if (lidContact) {
+                  return {
+                    phone: lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null,
+                    name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
+                  };
+                }
               }
             } catch(e) {}
-            return null;
+            return { phone: null, name: null };
           }, row.id);
           
+          let resolvedPhone = resolvedInfo.phone;
+          let resolvedName = resolvedInfo.name;
+
           if (!resolvedPhone && (row.id.includes('105403295727623') || row.phone === '105403295727623')) {
             resolvedPhone = '557591167094';
           }
 
-          if (resolvedPhone) {
-            const newId = `${resolvedPhone}@c.us`;
-            if (row.id !== newId) {
+          if (resolvedPhone || resolvedName) {
+            const newId = resolvedPhone ? `${resolvedPhone}@c.us` : row.id;
+            const newPhone = resolvedPhone || row.phone;
+            if (row.id !== newId || resolvedName) {
               await new Promise<void>((resolve) => {
                 let currentName = row.name;
-                if (currentName === row.phone || currentName === row.id.split('@')[0]) {
-                  currentName = resolvedPhone;
+                if (resolvedName && (currentName === row.phone || currentName === row.id.split('@')[0])) {
+                   currentName = resolvedName;
+                } else if (!resolvedName && (currentName === row.phone || currentName === row.id.split('@')[0])) {
+                   currentName = newPhone;
                 }
-                db.run("UPDATE chats SET id = ?, phone = ?, name = ? WHERE id = ?", [newId, resolvedPhone, currentName, row.id], (err) => {
+                db.run("UPDATE chats SET id = ?, phone = ?, name = ? WHERE id = ?", [newId, newPhone, currentName, row.id], (err) => {
                   if (err && err.message.includes('UNIQUE constraint failed')) {
                      // conflict, we just update messages and tags then delete
                      db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
                      db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
                      db.run("DELETE FROM chats WHERE id = ?", [row.id]);
-                  } else {
+                  } else if (newId !== row.id) {
                      db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
                      db.run("UPDATE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
                   }
@@ -1165,23 +1180,37 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       let chatId = rawChatId;
 
       if (rawChatId.includes('@lid') || (phone && phone.length > 14)) {
-        const realPhone = await waClient.pupPage.evaluate(async (lidJid) => {
+        const resolvedInfo = await waClient.pupPage.evaluate(async (lidJid) => {
           try {
             const w = window as any;
             if (w.Store && w.Store.Contact) {
               const all = w.Store.Contact.getModelsArray();
               const real = all.find((c: any) => c.id && c.id.server === 'c.us' && c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]);
-              return real?.id?.user ?? null;
+              if (real && real.id && real.id.user) {
+                return { phone: real.id.user, name: real.verifiedName || real.name || real.pushname || real.displayName };
+              }
+              const lidContact = w.Store.Contact.get(lidJid);
+              if (lidContact) {
+                return {
+                  phone: lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null,
+                  name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
+                };
+              }
             }
           } catch(e) {}
-          return null;
+          return { phone: null, name: null };
         }, rawChatId);
 
-        if (realPhone) {
-          phone = realPhone;
-          chatId = `${realPhone}@c.us`; 
+        if (resolvedInfo) {
+          if (resolvedInfo.phone) {
+            phone = resolvedInfo.phone;
+            chatId = `${phone}@c.us`; 
+          }
+          if (resolvedInfo.name && name === contact.number) {
+            name = resolvedInfo.name; // Keep the verified name instead of LID
+          }
           if (name === contact.number) {
-            name = phone; // Ensure name is at least the correct phone
+            name = phone; // Ensure name is at least the correct phone if name is missing
           }
         }
       }
