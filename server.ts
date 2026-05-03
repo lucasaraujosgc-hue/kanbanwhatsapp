@@ -1025,48 +1025,18 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
       for (const row of rows) {
         if (row.id.includes('@lid') || (row.phone && row.phone.length > 14)) {
-          let resolvedInfo = await waClient.pupPage.evaluate(async (lid) => {
+          let resolvedPhone = await waClient.pupPage.evaluate(async (lidJid) => {
             try {
               const w = window as any;
               if (w.Store && w.Store.Contact) {
-                const lidUser = lid.includes('@') ? lid.split('@')[0] : lid;
-                const contacts = w.Store.Contact.getModelsArray();
-                // Strategy 1: find c.us contact whose lidJid matches (try both formats)
-                const realContact = contacts.find((c: any) =>
-                  c.id && c.id.server === 'c.us' &&
-                  (c.lidJid === lid || c.lidJid === lidUser || c.lidJid === lidUser + '@lid')
-                );
-                if (realContact && realContact.id && realContact.id.user) {
-                  return { phone: realContact.id.user, name: realContact.verifiedName || realContact.name || realContact.pushname || realContact.displayName };
-                }
-                // Strategy 2: direct lookup via lid JID and via c.us equivalent
-                for (const lookupId of [lid, lidUser + '@lid', lidUser + '@c.us']) {
-                  const c = w.Store.Contact.get(lookupId);
-                  if (c) {
-                    if (c.id && c.id.server === 'c.us' && c.id.user) {
-                      return { phone: c.id.user, name: c.verifiedName || c.name || c.pushname || c.displayName };
-                    }
-                    if (c.phoneNumber) {
-                      return { phone: c.phoneNumber.split('@')[0], name: c.verifiedName || c.name || c.pushname || c.displayName };
-                    }
-                    if (c.linkedContact && c.linkedContact.id && c.linkedContact.id.server === 'c.us') {
-                      return { phone: c.linkedContact.id.user, name: c.linkedContact.verifiedName || c.linkedContact.name || c.linkedContact.pushname };
-                    }
-                  }
-                }
-                // Strategy 3: scan for matching user number
-                const fallback = contacts.find((c: any) => c.id && c.id.server === 'c.us' && c.id.user === lidUser);
-                if (fallback) {
-                  return { phone: fallback.id.user, name: fallback.verifiedName || fallback.name || fallback.pushname || fallback.displayName };
-                }
+                const all = w.Store.Contact.getModelsArray();
+                const real = all.find((c: any) => c.id && c.id.server === 'c.us' && c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]);
+                return real?.id?.user ?? null;
               }
             } catch(e) {}
-            return { phone: null, name: null };
+            return null;
           }, row.id);
           
-          let resolvedPhone = resolvedInfo.phone;
-          let resolvedName = resolvedInfo.name;
-
           if (!resolvedPhone && (row.id.includes('105403295727623') || row.phone === '105403295727623')) {
             resolvedPhone = '557591167094';
           }
@@ -1076,9 +1046,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
             if (row.id !== newId) {
               await new Promise<void>((resolve) => {
                 let currentName = row.name;
-                if (resolvedName && (currentName === row.phone || currentName === row.id.split('@')[0])) {
-                  currentName = resolvedName;
-                } else if (currentName === row.phone || currentName === row.id.split('@')[0]) {
+                if (currentName === row.phone || currentName === row.id.split('@')[0]) {
                   currentName = resolvedPhone;
                 }
                 db.run("UPDATE chats SET id = ?, phone = ?, name = ? WHERE id = ?", [newId, resolvedPhone, currentName, row.id], (err) => {
@@ -1211,77 +1179,30 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       let contact = await chat.getContact();
       let name = (contact as any).verifiedName || contact.name || contact.pushname || contact.number;
       let phone = contact.number;
+      let chatId = rawChatId;
 
-      // Handle LIDs to avoid creating separate chats for the same contact
       if (rawChatId.includes('@lid') || (phone && phone.length > 14)) {
-        let resolvedInfo = await waClient.pupPage.evaluate(async (lid) => {
+        const realPhone = await waClient.pupPage.evaluate(async (lidJid) => {
           try {
             const w = window as any;
             if (w.Store && w.Store.Contact) {
-              const lidUser = lid.includes('@') ? lid.split('@')[0] : lid;
-              const contacts = w.Store.Contact.getModelsArray();
-              // Strategy 1: find c.us contact whose lidJid matches (try both formats)
-              const realContact = contacts.find((c: any) =>
-                c.id && c.id.server === 'c.us' &&
-                (c.lidJid === lid || c.lidJid === lidUser || c.lidJid === lidUser + '@lid')
-              );
-              if (realContact && realContact.id && realContact.id.user) {
-                return { phone: realContact.id.user, name: realContact.verifiedName || realContact.name || realContact.pushname || realContact.displayName };
-              }
-              // Strategy 2: direct lookup via lid JID and via c.us equivalent
-              for (const lookupId of [lid, lidUser + '@lid', lidUser + '@c.us']) {
-                const c = w.Store.Contact.get(lookupId);
-                if (c) {
-                  // If this is a c.us contact, return directly
-                  if (c.id && c.id.server === 'c.us' && c.id.user) {
-                    return { phone: c.id.user, name: c.verifiedName || c.name || c.pushname || c.displayName };
-                  }
-                  // If it's a lid contact with a phoneNumber, use that
-                  if (c.phoneNumber) {
-                    return { phone: c.phoneNumber.split('@')[0], name: c.verifiedName || c.name || c.pushname || c.displayName };
-                  }
-                  // If it has a linked c.us contact
-                  if (c.linkedContact && c.linkedContact.id && c.linkedContact.id.server === 'c.us') {
-                    return { phone: c.linkedContact.id.user, name: c.linkedContact.verifiedName || c.linkedContact.name || c.linkedContact.pushname };
-                  }
-                }
-              }
-              // Strategy 3: scan all contacts for a matching number in the lid user part
-              const fallback = contacts.find((c: any) => c.id && c.id.server === 'c.us' && c.id.user === lidUser);
-              if (fallback) {
-                return { phone: fallback.id.user, name: fallback.verifiedName || fallback.name || fallback.pushname || fallback.displayName };
-              }
+              const all = w.Store.Contact.getModelsArray();
+              const real = all.find((c: any) => c.id && c.id.server === 'c.us' && c.lidJid && c.lidJid.split('@')[0] === lidJid.split('@')[0]);
+              return real?.id?.user ?? null;
             }
           } catch(e) {}
-          return { phone: null, name: null };
+          return null;
         }, rawChatId);
-        
-        let resolvedPhone = resolvedInfo.phone;
-        let resolvedName = resolvedInfo.name;
 
-        // Custom override for this specific LID
-        if (!resolvedPhone && (rawChatId.includes('105403295727623') || phone === '105403295727623')) {
-           resolvedPhone = '557591167094';
-        }
-
-        if (resolvedName && name === contact.number) {
-           name = resolvedName;
-        }
-
-        if (resolvedPhone) {
-          phone = resolvedPhone;
+        if (realPhone) {
+          phone = realPhone;
+          chatId = `${realPhone}@c.us`; 
           if (name === contact.number) {
-            name = resolvedPhone; // prevent setting name to the LID string
+            name = phone; // Ensure name is at least the correct phone
           }
-        } else if (phone && phone.length > 14) {
-            phone = null as any;
+        } else {
+          phone = ''; // Do not save LID as phone
         }
-      }
-
-      // Important: Use the resolved phone number for the chatId if it was a LID
-      let chatId = rawChatId;
-      if (phone && phone.length <= 15 && phone !== rawChatId.split('@')[0]) {
-        chatId = `${phone}@c.us`;
       }
 
       let body = msg.body;
@@ -1360,7 +1281,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       db.get("SELECT id FROM messages WHERE id = ?", [msg.id.id], (err, row) => {
         if (row) return; // Message already processed
 
-        db.get("SELECT id, profile_pic FROM chats WHERE id = ? OR (phone = ? AND phone IS NOT NULL AND phone != '')", [chatId, phone], (err, chatRow: any) => {
+        db.get("SELECT id, profile_pic FROM chats WHERE id = ? OR id = ? OR (phone = ? AND phone IS NOT NULL AND phone != '')", [chatId, rawChatId, phone], (err, chatRow: any) => {
           if (!chatRow) {
             // New chat, put in first column
             db.get("SELECT id FROM columns ORDER BY position ASC LIMIT 1", (err, colRow: any) => {
