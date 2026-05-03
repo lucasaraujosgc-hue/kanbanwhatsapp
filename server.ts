@@ -1200,9 +1200,9 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
           if (name === contact.number) {
             name = phone; // Ensure name is at least the correct phone
           }
-        } else {
-          phone = ''; // Do not save LID as phone
-        }
+        //} else {
+          //phone = ''; // Do not save LID as phone
+        //}
       }
 
       let body = msg.body;
