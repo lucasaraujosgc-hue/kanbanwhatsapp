@@ -1004,6 +1004,42 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
     });
   });
 
+  app.get('/api/debug-contacts', async (req, res) => {
+    if (!waClient || waStatus !== 'connected') {
+      return res.status(400).json({ error: 'WhatsApp not connected' });
+    }
+    
+    try {
+      const data = await waClient.pupPage.evaluate(async () => {
+        try {
+          const w = window as any;
+          const contacts = w.Store.Contact.getModelsArray();
+          const firstUs = contacts.find((c: any) => c.id && c.id.server === 'c.us' && !c.isGroup);
+          const firstLid = contacts.find((c: any) => c.id && c.id.server === 'lid');
+          
+          return {
+            usKeys: firstUs ? Object.keys(firstUs).filter(k => typeof firstUs[k] !== 'function') : [],
+            usProps: firstUs ? {
+               id: firstUs.id, lidJid: firstUs.lidJid, phoneNumber: firstUs.phoneNumber,
+               name: firstUs.name, pushname: firstUs.pushname
+            } : null,
+            lidKeys: firstLid ? Object.keys(firstLid).filter(k => typeof firstLid[k] !== 'function') : [],
+            lidProps: firstLid ? {
+               id: firstLid.id, lidJid: firstLid.lidJid, phoneNumber: firstLid.phoneNumber,
+               name: firstLid.name, pushname: firstLid.pushname
+            } : null,
+            totalContacts: contacts.length
+          };
+        } catch(e: any) {
+          return { error: e.toString() };
+        }
+      });
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post('/api/repair-names', async (req, res) => {
     if (!waClient || waStatus !== 'connected') {
       return res.status(400).json({ error: 'WhatsApp not connected' });
@@ -1032,14 +1068,43 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               const lidJid = `${lidNumber}@lid`;
               if (w.Store && w.Store.Contact) {
                 const contacts = w.Store.Contact.getModelsArray();
-                const realContact = contacts.find(c => c.lidJid === lidJid && c.id && c.id.server === 'c.us');
+
+                // 1. Find directly via lidJid property (if wwebjs maps it)
+                const realContact = contacts.find((c: any) => c.lidJid === lidJid && c.id && c.id.server === 'c.us');
                 if (realContact && realContact.id && realContact.id.user) {
                   return { phone: realContact.id.user, name: realContact.verifiedName || realContact.name || realContact.pushname || realContact.displayName };
                 }
+
+                // 2. Find via searching all object values for the lid string
+                const fuzzyContact = contacts.find((c: any) => {
+                   if (!c.id || c.id.server !== 'c.us') return false;
+                   if (c.lidJid === lidJid || c.lidJid === lidNumber) return true;
+                   for (let key in c) {
+                       if (typeof c[key] === 'string' && c[key].includes(lidNumber)) return true;
+                       if (c[key] && typeof c[key] === 'object' && c[key].user === lidNumber) return true;
+                   }
+                   return false;
+                });
+                
+                if (fuzzyContact && fuzzyContact.id && fuzzyContact.id.user) {
+                   return { phone: fuzzyContact.id.user, name: fuzzyContact.verifiedName || fuzzyContact.name || fuzzyContact.pushname || fuzzyContact.displayName };
+                }
+
+                // 3. Try fetching from the lid contact itself
                 const lidContact = w.Store.Contact.get(lidJid);
                 if (lidContact) {
+                  let foundPhone = lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null;
+                  if (!foundPhone) {
+                      for (let key in lidContact) {
+                         if (typeof lidContact[key] === 'string' && lidContact[key].includes('@c.us')) {
+                             foundPhone = lidContact[key].split('@')[0];
+                             break;
+                         }
+                      }
+                  }
+                  
                   return { 
-                    phone: (lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null), 
+                    phone: foundPhone, 
                     name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
                   };
                 }
@@ -1205,16 +1270,45 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
             const lidJid = `${lidNumber}@lid`;
             if (w.Store && w.Store.Contact) {
               const contacts = w.Store.Contact.getModelsArray();
-              // Try to find the c.us contact that has this lidJid
-              const realContact = contacts.find(c => c.lidJid === lidJid && c.id && c.id.server === 'c.us');
+              
+              // 1. Find directly via lidJid property (if wwebjs maps it)
+              const realContact = contacts.find((c: any) => c.lidJid === lidJid && c.id && c.id.server === 'c.us');
               if (realContact && realContact.id && realContact.id.user) {
                 return { phone: realContact.id.user, name: realContact.verifiedName || realContact.name || realContact.pushname || realContact.displayName };
               }
-              // Try fetching from the lid contact itself
+
+              // 2. Find via searching all object values for the lid string
+              const fuzzyContact = contacts.find((c: any) => {
+                 if (!c.id || c.id.server !== 'c.us') return false;
+                 // check if lidJid or any similar property exists
+                 if (c.lidJid === lidJid || c.lidJid === lidNumber) return true;
+                 for (let key in c) {
+                     if (typeof c[key] === 'string' && c[key].includes(lidNumber)) return true;
+                     if (c[key] && typeof c[key] === 'object' && c[key].user === lidNumber) return true;
+                 }
+                 return false;
+              });
+              
+              if (fuzzyContact && fuzzyContact.id && fuzzyContact.id.user) {
+                 return { phone: fuzzyContact.id.user, name: fuzzyContact.verifiedName || fuzzyContact.name || fuzzyContact.pushname || fuzzyContact.displayName };
+              }
+
+              // 3. Try fetching from the lid contact itself if phone was provided
               const lidContact = w.Store.Contact.get(lidJid);
               if (lidContact) {
+                // look for any property that looks like a c.us jid
+                let foundPhone = lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null;
+                if (!foundPhone) {
+                    for (let key in lidContact) {
+                       if (typeof lidContact[key] === 'string' && lidContact[key].includes('@c.us')) {
+                           foundPhone = lidContact[key].split('@')[0];
+                           break;
+                       }
+                    }
+                }
+                
                 return { 
-                  phone: (lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null), 
+                  phone: foundPhone,
                   name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
                 };
               }
