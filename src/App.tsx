@@ -1161,28 +1161,31 @@ export default function App() {
                       <div className={`w-8 h-8 rounded-full border border-slate-100 bg-slate-100 flex items-center justify-center text-slate-500 font-semibold flex-shrink-0 ${chat.profile_pic ? 'hidden' : ''}`}>
                         {chat.name ? chat.name.charAt(0).toUpperCase() : '?'}
                       </div>
-                      {editingChatNameId === chat.id ? (
-                        <input
-                          type="text"
-                          value={editChatName}
-                          onChange={(e) => setEditChatName(e.target.value)}
-                          onBlur={() => handleEditChatName(chat.id)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleEditChatName(chat.id)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="font-medium text-slate-800 border-b border-emerald-500 focus:outline-none w-full bg-slate-50 px-1 rounded-t"
-                          autoFocus
-                        />
-                      ) : (
-                        <h4 className="font-semibold text-slate-800 tracking-tight truncate pr-2 flex items-center gap-1 group/name">
-                          {chat.name || chat.phone}
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); setEditingChatNameId(chat.id); setEditChatName(chat.name || chat.phone); }}
-                            className="opacity-0 group-hover/name:opacity-100 text-slate-400 hover:text-emerald-500 transition-opacity"
-                          >
-                            <Edit2 size={12} />
-                          </button>
-                        </h4>
-                      )}
+                      <div className="flex flex-col flex-1 min-w-0">
+                        {editingChatNameId === chat.id ? (
+                          <input
+                            type="text"
+                            value={editChatName}
+                            onChange={(e) => setEditChatName(e.target.value)}
+                            onBlur={() => handleEditChatName(chat.id)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleEditChatName(chat.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="font-medium text-slate-800 border-b border-emerald-500 focus:outline-none w-full bg-slate-50 px-1 rounded-t"
+                            autoFocus
+                          />
+                        ) : (
+                          <h4 className="font-semibold text-slate-800 tracking-tight truncate pr-2 flex items-center gap-1 group/name">
+                            {chat.name || chat.phone}
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setEditingChatNameId(chat.id); setEditChatName(chat.name || chat.phone); }}
+                              className="opacity-0 group-hover/name:opacity-100 text-slate-400 hover:text-emerald-500 transition-opacity"
+                            >
+                              <Edit2 size={12} />
+                            </button>
+                          </h4>
+                        )}
+                        {chat.phone && <span className="text-[10px] text-slate-400 font-medium truncate">{chat.phone}</span>}
+                      </div>
                     </div>
                     {chat.unread_count > 0 && (
                       <span className="bg-emerald-500 text-white shadow-sm text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0">

@@ -733,8 +733,10 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         const msgId = sentMsg.id.id;
         const timestamp = Date.now();
         
-        db.run("INSERT INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-          [msgId, chatId, body || '', 1, timestamp, mediaUrl, mediaType, mediaName]);
+        db.run("INSERT OR IGNORE INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [msgId, chatId, body || '', 1, timestamp, mediaUrl, mediaType, mediaName], (err: any) => {
+            if (err) console.error("Message insert error:", err);
+          });
           
         db.run("UPDATE chats SET last_message = ?, last_message_time = ?, last_message_from_me = 1 WHERE id = ?",
           [body || 'Media', timestamp, chatId]);
@@ -1332,8 +1334,16 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         });
 
         // Save message
-        db.run("INSERT INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name, transcription) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [msg.id.id, chatId, body, fromMe, timestamp, mediaUrl, mediaType, mediaName, transcription], async () => {
+        db.run("INSERT OR IGNORE INTO messages (id, chat_id, body, from_me, timestamp, media_url, media_type, media_name, transcription) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [msg.id.id, chatId, body, fromMe, timestamp, mediaUrl, mediaType, mediaName, transcription], async function(this: any, err: any) {
+            if (err) {
+              console.error("Error inserting message:", err);
+              return;
+            }
+            if (this.changes === 0) {
+              // Message already existed, so we don't emit a new message event again
+              return;
+            }
             io.emit('new_message', { id: msg.id.id, chat_id: chatId, body, from_me: fromMe, timestamp, media_url: mediaUrl, media_type: mediaType, media_name: mediaName, transcription });
             
             // Check if message is from the specific number and not from me
