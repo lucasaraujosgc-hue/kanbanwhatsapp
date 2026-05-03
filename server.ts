@@ -1022,7 +1022,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
                 const lidContact = w.Store.Contact.get(lidJid);
                 if (lidContact) {
                   return {
-                    phone: lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null,
+                    phone: null, // do not use lidContact.phoneNumber
                     name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
                   };
                 }
@@ -1040,8 +1040,14 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
           if (resolvedPhone || resolvedName) {
             const newId = resolvedPhone ? `${resolvedPhone}@c.us` : row.id;
-            const newPhone = resolvedPhone || row.phone;
-            if (row.id !== newId || resolvedName) {
+            let newPhone = resolvedPhone || row.phone;
+            
+            // If the phone is still a LID string (same as the @lid id), clear it
+            if (!resolvedPhone && newPhone === row.id.split('@')[0] && row.id.includes('@lid')) {
+              newPhone = '';
+            }
+
+            if (row.id !== newId || resolvedName || newPhone !== row.phone) {
               await new Promise<void>((resolve) => {
                 let currentName = row.name;
                 if (resolvedName && (currentName === row.phone || currentName === row.id.split('@')[0])) {
@@ -1194,7 +1200,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               const lidContact = w.Store.Contact.get(lidJid);
               if (lidContact) {
                 return {
-                  phone: lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null,
+                  phone: null, // do not use lidContact.phoneNumber
                   name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
                 };
               }
@@ -1207,6 +1213,8 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
           if (resolvedInfo.phone) {
             phone = resolvedInfo.phone;
             chatId = `${phone}@c.us`; 
+          } else if (phone === rawChatId.split('@')[0] && rawChatId.includes('@lid')) {
+            phone = ''; // Do NOT save the raw LID string as a phone number
           }
           if (resolvedInfo.name && name === contact.number) {
             name = resolvedInfo.name; // Keep the verified name instead of LID
