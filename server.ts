@@ -129,6 +129,28 @@ db.serialize(() => {
   db.run(`ALTER TABLE messages ADD COLUMN media_name TEXT`, (err) => { /* ignore */ });
   db.run(`ALTER TABLE messages ADD COLUMN transcription TEXT`, (err) => { /* ignore */ });
 
+  // Hotfix migration for LIDs to correct the specific missing contact
+  // Hotfix migration for LIDs to correct the specific missing contact
+  // We use INSERT OR REPLACE for chats and then delete the old one to avoid UNIQUE constraint failed if the c.us chat already exists.
+  db.get("SELECT * FROM chats WHERE id LIKE '%105403295727623%' OR phone LIKE '%105403295727623%'", (err, row: any) => {
+    if (row && row.id !== '557591167094@c.us') {
+      let currentName = row.name;
+      if (currentName === '105403295727623') currentName = '557591167094';
+      db.run("INSERT OR REPLACE INTO chats (id, name, phone, column_id, last_message, last_message_time, unread_count, profile_pic, last_message_from_me) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ['557591167094@c.us', currentName, '557591167094', row.column_id, row.last_message, row.last_message_time, row.unread_count, row.profile_pic, row.last_message_from_me], () => {
+          db.run("UPDATE messages SET chat_id = '557591167094@c.us' WHERE chat_id = ?", [row.id]);
+          db.run("UPDATE OR IGNORE chat_tags SET chat_id = '557591167094@c.us' WHERE chat_id = ?", [row.id]);
+          db.run("DELETE FROM chats WHERE id = ?", [row.id]);
+        }
+      );
+    }
+  });
+
+  // Hotfix delete 0@c.us (corrupted or dummy chat)
+  db.run("DELETE FROM messages WHERE chat_id = '0@c.us'");
+  db.run("DELETE FROM chat_tags WHERE chat_id = '0@c.us'");
+  db.run("DELETE FROM chats WHERE id = '0@c.us' OR id = '0' OR phone = '0'");
+
   // Insert default columns if empty
   db.get("SELECT COUNT(*) as count FROM columns", (err, row: any) => {
     if (row && row.count === 0) {
@@ -877,22 +899,25 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
   const syncChatProfilePic = async (chatId: string) => {
     if (!waClient || waStatus !== 'connected') return null;
+    if (!chatId || chatId === '0@c.us') return null;
 
     try {
-      let name = '';
+      const chat = await waClient.getChatById(chatId);
+      let name = chat.name || '';
       
-      // Try to get contact directly first
       try {
-        const contact = await waClient.getContactById(chatId);
+        const contact = await chat.getContact();
         if (contact) {
           name = contact.name || contact.pushname || contact.number || name;
+          if (name && name.length > 14 && name.startsWith('105')) {
+             // specific workaround if it falls back to a LID phone number
+             if (chatId.includes('105403295727623') || name === '105403295727623' || chatId === '557591167094@c.us') {
+               name = '557591167094';
+             }
+          }
         }
-      } catch (err: any) {
-        // Fallback to chat if contact fails
-        try {
-          const chat = await waClient.getChatById(chatId);
-          name = chat.name || '';
-        } catch (err2: any) {}
+      } catch (e) {
+        // Ignore error for @lid contacts or other special contacts
       }
       
       let profilePicUrl = await getProfilePicUrl(waClient, chatId);
@@ -905,22 +930,12 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         profilePic = await downloadProfilePic(profilePicUrl, chatId);
       }
 
-      // If we still don't have a name and couldn't get it, try to fetch current name from DB to not overwrite with empty
-      if (!name) {
-        const existingChat: any = await new Promise((resolve) => {
-          db.get("SELECT name FROM chats WHERE id = ?", [chatId], (err, row) => resolve(row));
-        });
-        if (existingChat && existingChat.name) {
-          name = existingChat.name;
-        }
-      }
-
       db.run(
         "UPDATE chats SET profile_pic = ?, name = ? WHERE id = ?",
         [profilePic || null, name, chatId],
         (err) => {
           if (err) {
-            console.error(`Error updating chat info for ${chatId} in db:`, err);
+            console.error(`Error updating chat info for ${chatId}:`, err);
             return;
           }
 
@@ -934,10 +949,10 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
 
       return profilePic || null;
     } catch (error: any) {
-      if (error && error.message && (error.message.includes('No LID') || error.message.includes('destroyed') || error.message.includes('getChat'))) {
-        // Silently ignore known whatsapp-web.js internal errors
+      if (error && error.message && (error.message.includes('getChat') || error.message.includes('No LID for user') || error.message.includes('Cannot read properties of undefined'))) {
+        // Silly warning due to WhatsApp internal changes on non-existent chats, ignore silently
       } else {
-        console.error(`Error syncing chat info for ${chatId}:`, error.message || error);
+        console.error(`Error syncing chat info for ${chatId}:`, error);
       }
       return null;
     }
@@ -973,15 +988,100 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       }
 
       try {
+        let count = 0;
         for (const row of rows) {
-          await syncChatProfilePic(row.id);
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          if (row.id && row.id !== '0@c.us' && !row.id.startsWith('0@')) {
+            await syncChatProfilePic(row.id);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            count++;
+          }
         }
 
-        res.json({ success: true, total: rows.length });
+        res.json({ success: true, total: count });
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
+    });
+  });
+
+  app.post('/api/repair-names', async (req, res) => {
+    if (!waClient || waStatus !== 'connected') {
+      return res.status(400).json({ error: 'WhatsApp not connected' });
+    }
+
+    // specific fix for 105403295727623 -> 557591167094
+    db.run("UPDATE chats SET id = '557591167094@c.us', phone = '557591167094', name = '557591167094' WHERE id LIKE '%105403295727623%' OR phone LIKE '%105403295727623%'", (err) => {
+      if(err && err.message.includes('UNIQUE constraint failed')) {
+         // It exists, merge it
+         db.run("UPDATE messages SET chat_id = '557591167094@c.us' WHERE chat_id LIKE '%105403295727623%'");
+         db.run("UPDATE OR IGNORE chat_tags SET chat_id = '557591167094@c.us' WHERE chat_id LIKE '%105403295727623%'");
+         db.run("DELETE FROM chats WHERE id LIKE '%105403295727623%'");
+      }
+    });
+
+    db.all("SELECT id, name, phone FROM chats", async (err, rows: any[]) => {
+      if (err) return res.status(500).json({ error: err.message });
+      let fixed = 0;
+
+      for (const row of rows) {
+        if (row.id.includes('@lid') || (row.phone && row.phone.length > 14)) {
+          let resolvedInfo = await waClient.pupPage.evaluate(async (lid) => {
+            try {
+              const w = window as any;
+              if (w.Store && w.Store.Contact) {
+                const contacts = w.Store.Contact.getModelsArray();
+                const realContact = contacts.find(c => c.lidJid === lid && c.id && c.id.server === 'c.us');
+                if (realContact && realContact.id && realContact.id.user) {
+                  return { phone: realContact.id.user, name: realContact.verifiedName || realContact.name || realContact.pushname || realContact.displayName };
+                }
+                const lidContact = w.Store.Contact.get(lid);
+                if (lidContact) {
+                  return { 
+                    phone: (lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null), 
+                    name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
+                  };
+                }
+              }
+            } catch(e) {}
+            return { phone: null, name: null };
+          }, row.id);
+          
+          let resolvedPhone = resolvedInfo.phone;
+          let resolvedName = resolvedInfo.name;
+
+          if (!resolvedPhone && (row.id.includes('105403295727623') || row.phone === '105403295727623')) {
+            resolvedPhone = '557591167094';
+          }
+
+          if (resolvedPhone) {
+            const newId = `${resolvedPhone}@c.us`;
+            if (row.id !== newId) {
+              await new Promise<void>((resolve) => {
+                let currentName = row.name;
+                if (resolvedName && (currentName === row.phone || currentName === row.id.split('@')[0])) {
+                  currentName = resolvedName;
+                } else if (currentName === row.phone || currentName === row.id.split('@')[0]) {
+                  currentName = resolvedPhone;
+                }
+                db.run("UPDATE chats SET id = ?, phone = ?, name = ? WHERE id = ?", [newId, resolvedPhone, currentName, row.id], (err) => {
+                  if (err && err.message.includes('UNIQUE constraint failed')) {
+                     // conflict, we just update messages and tags then delete
+                     db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
+                     db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
+                     db.run("DELETE FROM chats WHERE id = ?", [row.id]);
+                  } else {
+                     db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
+                     db.run("UPDATE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
+                  }
+                  fixed++;
+                  resolve();
+                });
+              });
+            }
+          }
+        }
+      }
+      res.json({ success: true, fixed });
     });
   });
 
@@ -1055,8 +1155,10 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         }
 
         for (const row of rows) {
-          await syncChatProfilePic(row.id);
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          if (row.id && row.id !== '0@c.us' && !row.id.startsWith('0@')) {
+             await syncChatProfilePic(row.id);
+             await new Promise(resolve => setTimeout(resolve, 1000));
+          }
         }
       });
     });
@@ -1087,10 +1189,62 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       const chat = await msg.getChat();
       if (chat.isGroup) return; // Ignore groups for now
 
-      const chatId = chat.id._serialized;
-      const contact = await chat.getContact();
-      const name = contact.name || contact.pushname || contact.number;
-      const phone = contact.number;
+      let rawChatId = chat.id._serialized;
+      let contact = await chat.getContact();
+      let name = (contact as any).verifiedName || contact.name || contact.pushname || contact.number;
+      let phone = contact.number;
+
+      // Handle LIDs to avoid creating separate chats for the same contact
+      if (rawChatId.includes('@lid') || (phone && phone.length > 14)) {
+        let resolvedInfo = await waClient.pupPage.evaluate(async (lid) => {
+          try {
+            const w = window as any;
+            if (w.Store && w.Store.Contact) {
+              const contacts = w.Store.Contact.getModelsArray();
+              // Try to find the c.us contact that has this lidJid
+              const realContact = contacts.find(c => c.lidJid === lid && c.id && c.id.server === 'c.us');
+              if (realContact && realContact.id && realContact.id.user) {
+                return { phone: realContact.id.user, name: realContact.verifiedName || realContact.name || realContact.pushname || realContact.displayName };
+              }
+              // Try fetching from the lid contact itself
+              const lidContact = w.Store.Contact.get(lid);
+              if (lidContact) {
+                return { 
+                  phone: (lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null), 
+                  name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
+                };
+              }
+            }
+          } catch(e) {}
+          return { phone: null, name: null };
+        }, rawChatId);
+        
+        let resolvedPhone = resolvedInfo.phone;
+        let resolvedName = resolvedInfo.name;
+
+        // Custom override for this specific LID
+        if (!resolvedPhone && (rawChatId.includes('105403295727623') || phone === '105403295727623')) {
+           resolvedPhone = '557591167094';
+        }
+
+        if (resolvedName && name === contact.number) {
+           name = resolvedName;
+        }
+
+        if (resolvedPhone) {
+          phone = resolvedPhone;
+          if (name === contact.number) {
+            name = resolvedPhone; // prevent setting name to the LID string
+          }
+        }
+      }
+
+      // Important: Use the resolved phone number for the chatId if it was a LID
+      let chatId = rawChatId;
+      if (phone && phone.length <= 15 && phone !== rawChatId.split('@')[0]) {
+        chatId = `${phone}@c.us`;
+      }
+
       let body = msg.body;
       const timestamp = msg.timestamp * 1000;
       const fromMe = msg.fromMe ? 1 : 0;
@@ -1100,7 +1254,7 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       let mediaName = null;
       let transcription = null;
 
-      if (msg.hasMedia) {
+      if (msg.hasMedia && msg.type !== 'interactive' && msg.type !== 'interactive_response') {
         try {
           const media = await msg.downloadMedia();
           if (media) {
@@ -1135,8 +1289,12 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
               }
             }
           }
-        } catch (err) {
-          console.error('Error downloading media:', err);
+        } catch (err: any) {
+          if (err && err.message && err.message.includes('webMediaType is invalid')) {
+            // Silently ignore interactive/unsupported media types
+          } else {
+            console.error('Error downloading media:', err);
+          }
         }
       }
 
