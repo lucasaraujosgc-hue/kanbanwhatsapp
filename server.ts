@@ -879,16 +879,20 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
     if (!waClient || waStatus !== 'connected') return null;
 
     try {
-      const chat = await waClient.getChatById(chatId);
-      let name = chat.name || '';
+      let name = '';
       
+      // Try to get contact directly first
       try {
-        const contact = await chat.getContact();
+        const contact = await waClient.getContactById(chatId);
         if (contact) {
           name = contact.name || contact.pushname || contact.number || name;
         }
-      } catch (e) {
-        // Ignore error for @lid contacts or other special contacts
+      } catch (err: any) {
+        // Fallback to chat if contact fails
+        try {
+          const chat = await waClient.getChatById(chatId);
+          name = chat.name || '';
+        } catch (err2: any) {}
       }
       
       let profilePicUrl = await getProfilePicUrl(waClient, chatId);
@@ -901,12 +905,22 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         profilePic = await downloadProfilePic(profilePicUrl, chatId);
       }
 
+      // If we still don't have a name and couldn't get it, try to fetch current name from DB to not overwrite with empty
+      if (!name) {
+        const existingChat: any = await new Promise((resolve) => {
+          db.get("SELECT name FROM chats WHERE id = ?", [chatId], (err, row) => resolve(row));
+        });
+        if (existingChat && existingChat.name) {
+          name = existingChat.name;
+        }
+      }
+
       db.run(
         "UPDATE chats SET profile_pic = ?, name = ? WHERE id = ?",
         [profilePic || null, name, chatId],
         (err) => {
           if (err) {
-            console.error(`Error updating chat info for ${chatId}:`, err);
+            console.error(`Error updating chat info for ${chatId} in db:`, err);
             return;
           }
 
@@ -919,8 +933,12 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
       );
 
       return profilePic || null;
-    } catch (error) {
-      console.error(`Error syncing chat info for ${chatId}:`, error);
+    } catch (error: any) {
+      if (error && error.message && (error.message.includes('No LID') || error.message.includes('destroyed') || error.message.includes('getChat'))) {
+        // Silently ignore known whatsapp-web.js internal errors
+      } else {
+        console.error(`Error syncing chat info for ${chatId}:`, error.message || error);
+      }
       return null;
     }
   };
