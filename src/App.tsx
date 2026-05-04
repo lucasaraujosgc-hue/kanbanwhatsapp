@@ -868,7 +868,7 @@ export default function App() {
                     }}
                     className="w-full flex items-center justify-center gap-1 text-xs text-blue-600 bg-blue-50 py-2 rounded-lg hover:bg-blue-100 transition-colors font-medium border border-blue-100"
                   >
-                    <RefreshCw size={12} /> Corrigir .lid 
+                    <RefreshCw size={12} /> Sync Nomes e LID
                   </button>
                   <button 
                     onClick={handleResetWa}

@@ -13,6 +13,7 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { GoogleGenAI } from '@google/genai';
 import axios from 'axios';
+import archiver from 'archiver';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -132,25 +133,29 @@ db.serialize(() => {
   // General Migration for LIDs and Duplicates:
   // Ensure that specific problematic contacts are remapped correctly, and all other numbers are unified.
   const mergeDuplicateChats = () => {
-    // Determine the old IDs based on phone
+    // 1. First, merge 557591167094 to 105403295727623
     db.all("SELECT id FROM chats WHERE id LIKE '%557591167094%' AND id != '105403295727623@lid'", (err, rows: any[]) => {
       if (err || !rows) return;
       rows.forEach(row => {
          const oldId = row.id;
-         db.run("UPDATE chats SET id = '105403295727623@lid', phone = '105403295727623' WHERE id = ?", [oldId], (err) => {
-           if(err && err.message.includes('UNIQUE constraint failed')) {
-              db.run("UPDATE messages SET chat_id = '105403295727623@lid' WHERE chat_id = ?", [oldId]);
-              db.run("UPDATE OR IGNORE chat_tags SET chat_id = '105403295727623@lid' WHERE chat_id = ?", [oldId]);
-              db.run("DELETE FROM chats WHERE id = ?", [oldId]);
+         db.get("SELECT id FROM chats WHERE id = '105403295727623@lid'", (err, existing) => {
+           if (existing) {
+             // target exists, merge
+             db.run("UPDATE messages SET chat_id = '105403295727623@lid' WHERE chat_id = ?", [oldId]);
+             db.run("UPDATE OR IGNORE chat_tags SET chat_id = '105403295727623@lid' WHERE chat_id = ?", [oldId]);
+             db.run("DELETE FROM chats WHERE id = ?", [oldId]);
            } else {
-              db.run("UPDATE messages SET chat_id = '105403295727623@lid' WHERE chat_id = ?", [oldId]);
-              db.run("UPDATE OR IGNORE chat_tags SET chat_id = '105403295727623@lid' WHERE chat_id = ?", [oldId]);
+             // target doesn't exist, just update ID
+             db.run("UPDATE chats SET id = '105403295727623@lid', phone = '105403295727623' WHERE id = ?", [oldId], () => {
+               db.run("UPDATE messages SET chat_id = '105403295727623@lid' WHERE chat_id = ?", [oldId]);
+               db.run("UPDATE OR IGNORE chat_tags SET chat_id = '105403295727623@lid' WHERE chat_id = ?", [oldId]);
+             });
            }
          });
       });
     });
 
-    // Fix malformed IDs
+    // 2. Fix malformed IDs globally
     db.all("SELECT * FROM chats WHERE id NOT LIKE '%@%'", (err, rows: any[]) => {
       if (err) return;
       if (rows && rows.length > 0) {
@@ -158,16 +163,18 @@ db.serialize(() => {
           if (row.id === '0' || row.id === 'status@broadcast') return;
           let cleanPhone = String(row.phone || row.id).replace(/[^0-9]/g, '');
           if (!cleanPhone) return;
-          let currentName = row.name;
           const newId = cleanPhone.length > 14 ? `${cleanPhone}@lid` : `${cleanPhone}@c.us`;
-          db.run("UPDATE chats SET id = ?, phone = ? WHERE id = ?", [newId, cleanPhone, row.id], (err) => {
-            if (err && err.message.includes('UNIQUE constraint failed')) {
+          
+          db.get("SELECT id FROM chats WHERE id = ?", [newId], (err, existing) => {
+            if (existing) {
               db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
               db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
               db.run("DELETE FROM chats WHERE id = ?", [row.id]);
             } else {
-              db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
-              db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
+              db.run("UPDATE chats SET id = ?, phone = ? WHERE id = ?", [newId, cleanPhone, row.id], () => {
+                db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
+                db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
+              });
             }
           });
         });
@@ -701,6 +708,30 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
     });
   });
 
+  app.get('/api/export', (req, res) => {
+    try {
+      const archive = archiver('zip', {
+        zlib: { level: 9 }
+      });
+      
+      res.attachment('whatskanban_export.zip');
+      archive.pipe(res);
+      
+      if (fs.existsSync(DATA_DIR)) {
+        archive.directory(DATA_DIR, 'data');
+      }
+      
+      if (fs.existsSync(AI_DATA_DIR)) {
+        archive.directory(AI_DATA_DIR, 'ai_data');
+      }
+      
+      archive.finalize();
+    } catch (e: any) {
+      console.error('Export error:', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get('/api/system/storage', (req, res) => {
     try {
       let totalSize = 0;
@@ -1077,107 +1108,82 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
     }
 
     // specific fix for 105403295727623
-    db.run("UPDATE chats SET id = '105403295727623@lid', phone = '105403295727623' WHERE id LIKE '%557591167094%' OR phone LIKE '%557591167094%'", (err) => {
-      if(err && err.message.includes('UNIQUE constraint failed')) {
-         // It exists, merge it
-         db.run("UPDATE messages SET chat_id = '105403295727623@lid' WHERE chat_id LIKE '%557591167094%'");
-         db.run("UPDATE OR IGNORE chat_tags SET chat_id = '105403295727623@lid' WHERE chat_id LIKE '%557591167094%'");
-         db.run("DELETE FROM chats WHERE id LIKE '%557591167094%'");
-      } else {
-         db.run("UPDATE messages SET chat_id = '105403295727623@lid' WHERE chat_id LIKE '%557591167094%'");
-         db.run("UPDATE OR IGNORE chat_tags SET chat_id = '105403295727623@lid' WHERE chat_id LIKE '%557591167094%'");
-      }
+    db.all("SELECT id FROM chats WHERE id LIKE '%557591167094%' AND id != '105403295727623@lid'", (err, rows: any[]) => {
+      if (err || !rows) return;
+      rows.forEach(row => {
+         const oldId = row.id;
+         db.get("SELECT id FROM chats WHERE id = '105403295727623@lid'", (err, existing) => {
+           if (existing) {
+             db.run("UPDATE messages SET chat_id = '105403295727623@lid' WHERE chat_id = ?", [oldId]);
+             db.run("UPDATE OR IGNORE chat_tags SET chat_id = '105403295727623@lid' WHERE chat_id = ?", [oldId]);
+             db.run("DELETE FROM chats WHERE id = ?", [oldId]);
+           } else {
+             db.run("UPDATE chats SET id = '105403295727623@lid', phone = '105403295727623' WHERE id = ?", [oldId], () => {
+               db.run("UPDATE messages SET chat_id = '105403295727623@lid' WHERE chat_id = ?", [oldId]);
+               db.run("UPDATE OR IGNORE chat_tags SET chat_id = '105403295727623@lid' WHERE chat_id = ?", [oldId]);
+             });
+           }
+         });
+      });
     });
 
     db.all("SELECT id, name, phone FROM chats", async (err, rows: any[]) => {
       if (err) return res.status(500).json({ error: err.message });
       let fixed = 0;
 
-      for (const row of rows) {
-        if (row.id.includes('@lid') || (row.phone && row.phone.length > 14)) {
-          let resolvedInfo = await waClient.pupPage.evaluate(async (lid) => {
-            try {
-              const w = window as any;
-              const lidNumber = lid.split('@')[0];
-              const lidJid = `${lidNumber}@lid`;
-              if (w.Store && w.Store.Contact) {
-                const contacts = w.Store.Contact.getModelsArray();
+      try {
+        const contacts = await waClient!.getContacts();
+        console.log(`Manual repair-names sync: fetched ${contacts.length} contacts`);
 
-                // 1. Find directly via lidJid property (if wwebjs maps it)
-                const realContact = contacts.find((c: any) => c.lidJid === lidJid && c.id && c.id.server === 'c.us');
-                if (realContact && realContact.id && realContact.id.user) {
-                  return { phone: realContact.id.user, name: realContact.verifiedName || realContact.name || realContact.pushname || realContact.displayName };
-                }
+        for (const chat of rows) {
+          if (chat.id && chat.id !== '0@c.us' && !chat.id.startsWith('0@')) {
+             // Find matching contact
+             const contactMatches = contacts.find(c => 
+               c.id._serialized === chat.id || 
+               c.number === chat.phone || 
+               (chat.phone && c.id._serialized.includes(chat.phone)) ||
+               (chat.id.includes('@lid') && (c as any).lidJid === chat.id)
+             );
 
-                // 2. Find via searching all object values for the lid string
-                const fuzzyContact = contacts.find((c: any) => {
-                   if (!c.id || c.id.server !== 'c.us') return false;
-                   if (c.lidJid === lidJid || c.lidJid === lidNumber) return true;
-                   for (let key in c) {
-                       if (typeof c[key] === 'string' && c[key].includes(lidNumber)) return true;
-                       if (c[key] && typeof c[key] === 'object' && c[key].user === lidNumber) return true;
-                   }
-                   return false;
-                });
-                
-                if (fuzzyContact && fuzzyContact.id && fuzzyContact.id.user) {
-                   return { phone: fuzzyContact.id.user, name: fuzzyContact.verifiedName || fuzzyContact.name || fuzzyContact.pushname || fuzzyContact.displayName };
-                }
+             if (contactMatches) {
+               let targetChatId = chat.id;
+               const lidJid = (contactMatches as any).lidJid || (contactMatches.id.server === 'lid' ? contactMatches.id._serialized : null);
+               if (lidJid && chat.id !== lidJid) {
+                 const newPhone = lidJid.split('@')[0];
+                 await new Promise<void>((resolve) => {
+                   db.get("SELECT id FROM chats WHERE id = ?", [lidJid], (err, existing) => {
+                     if (existing) {
+                       db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [lidJid, chat.id]);
+                       db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [lidJid, chat.id]);
+                       db.run("DELETE FROM chats WHERE id = ?", [chat.id], () => resolve());
+                     } else {
+                       db.run("UPDATE chats SET id = ?, phone = ? WHERE id = ?", [lidJid, newPhone, chat.id], () => {
+                         db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [lidJid, chat.id]);
+                         db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [lidJid, chat.id]);
+                         resolve();
+                       });
+                     }
+                   });
+                 });
+                 targetChatId = lidJid;
+                 fixed++;
+                 io.emit('chat_deleted', { id: chat.id });
+               }
 
-                // 3. Try fetching from the lid contact itself
-                const lidContact = w.Store.Contact.get(lidJid);
-                if (lidContact) {
-                  let foundPhone = lidContact.phoneNumber ? lidContact.phoneNumber.split('@')[0] : null;
-                  if (!foundPhone) {
-                      for (let key in lidContact) {
-                         if (typeof lidContact[key] === 'string' && lidContact[key].includes('@c.us')) {
-                             foundPhone = lidContact[key].split('@')[0];
-                             break;
-                         }
-                      }
-                  }
-                  
-                  return { 
-                    phone: foundPhone, 
-                    name: lidContact.verifiedName || lidContact.name || lidContact.pushname || lidContact.displayName
-                  };
-                }
-              }
-            } catch(e) {}
-            return { phone: null, name: null };
-          }, row.id);
-          
-          let resolvedPhone = resolvedInfo.phone;
-          let resolvedName = resolvedInfo.name;
-
-          if (resolvedPhone) {
-            const newId = `${resolvedPhone}@c.us`;
-            if (row.id !== newId) {
-              await new Promise<void>((resolve) => {
-                let currentName = row.name;
-                if (resolvedName && (currentName === row.phone || currentName === row.id.split('@')[0])) {
-                  currentName = resolvedName;
-                } else if (currentName === row.phone || currentName === row.id.split('@')[0]) {
-                  currentName = resolvedPhone;
-                }
-                db.run("UPDATE chats SET id = ?, phone = ?, name = ? WHERE id = ?", [newId, resolvedPhone, currentName, row.id], (err) => {
-                  if (err && err.message.includes('UNIQUE constraint failed')) {
-                     // conflict, we just update messages and tags then delete
-                     db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
-                     db.run("UPDATE OR IGNORE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
-                     db.run("DELETE FROM chats WHERE id = ?", [row.id]);
-                  } else {
-                     db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
-                     db.run("UPDATE chat_tags SET chat_id = ? WHERE chat_id = ?", [newId, row.id]);
-                  }
-                  fixed++;
-                  resolve();
-                });
-              });
-            }
+               const newName = contactMatches.name || contactMatches.pushname || (contactMatches as any).verifiedName;
+               if (newName && newName !== chat.name && newName !== chat.phone && newName !== chat.id.split('@')[0]) {
+                 db.run("UPDATE chats SET name = ? WHERE id = ?", [newName, targetChatId], () => {
+                   io.emit('chat_updated', { id: targetChatId, name: newName });
+                 });
+                 fixed++;
+               }
+             }
           }
         }
+      } catch (err) {
+        console.error('Error during manual repair names:', err);
       }
+
       res.json({ success: true, fixed });
     });
   });
@@ -1404,10 +1410,21 @@ REGRA FINAL: Você é um assistente operacional de CRM/WhatsApp para contabilida
         }
       }
 
-      // Important: Use the resolved phone number for the chatId if it was a LID
-      let chatId = rawChatId;
-      if (phone && phone !== rawChatId.split('@')[0]) {
-        chatId = phone.length > 14 ? `${phone}@lid` : `${phone}@c.us`;
+      // Important: Always use the rawChatId to prevent splitting conversations.
+      // If Whatsapp gives us a LID, we store messages in the LID chat.
+      const chatId = rawChatId;
+      
+      // On the fly migration if we receive a message from a lid, but the old c.us exists
+      if (chatId.includes('@lid') && phone && phone !== chatId.split('@')[0]) {
+         const oldId = `${phone}@c.us`;
+         db.get("SELECT id FROM chats WHERE id = ?", [oldId], (err, row) => {
+            if (row) {
+                 db.run("UPDATE messages SET chat_id = ? WHERE chat_id = ?", [chatId, oldId]);
+                 db.run("UPDATE chat_tags SET chat_id = ? WHERE chat_id = ?", [chatId, oldId]);
+                 db.run("DELETE FROM chats WHERE id = ?", [oldId]);
+                 io.emit('chat_deleted', { id: oldId });
+            }
+         });
       }
 
       let body = msg.body;
