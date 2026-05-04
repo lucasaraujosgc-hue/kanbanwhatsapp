@@ -140,14 +140,14 @@ export default function App() {
   const [isCopilotLoading, setIsCopilotLoading] = useState(false);
   const copilotMessagesEndRef = useRef<HTMLDivElement>(null);
 
-  const [chatPanelWidth, setChatPanelWidth] = useState<number>(320);
+  const [chatPanelWidth, setChatPanelWidth] = useState<number>(384);
   const isResizingRef = useRef(false);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingRef.current) return;
       const newWidth = document.body.clientWidth - e.clientX;
-      if (newWidth > 260 && newWidth < 700) {
+      if (newWidth > 300 && newWidth < 800) {
         setChatPanelWidth(newWidth);
       }
     };
@@ -811,18 +811,18 @@ export default function App() {
     <div className="flex h-screen bg-slate-50 font-sans overflow-hidden">
       {/* Sidebar / Settings */}
       {isSidebarOpen && (
-        <div className="w-56 bg-white border-r border-slate-200 shadow-[2px_0_8px_-4px_rgba(0,0,0,0.1)] flex flex-col flex-shrink-0 z-10">
-          <div className="px-3 py-3 border-b border-slate-100 flex items-center justify-between">
+        <div className="w-64 bg-white border-r border-slate-200 shadow-[2px_0_8px_-4px_rgba(0,0,0,0.1)] flex flex-col flex-shrink-0 z-10">
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <MessageCircle className="text-emerald-500" size={16} />
-              <h1 className="font-bold text-base text-slate-800 tracking-tight">WhatsKanban</h1>
+              <MessageCircle className="text-emerald-500" />
+              <h1 className="font-bold text-lg text-slate-800 tracking-tight">WhatsKanban</h1>
             </div>
             <button onClick={() => setIsSidebarOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
               <X size={20} />
             </button>
           </div>
           
-          <div className="px-3 py-2 border-b border-slate-100">
+          <div className="p-4 border-b border-slate-100">
             <input
               type="text"
               placeholder="Buscar chats..."
@@ -832,10 +832,10 @@ export default function App() {
             />
           </div>
           
-          <div className="px-3 py-3 flex-1 overflow-y-auto no-scrollbar">
-            <h2 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Conexão WhatsApp</h2>
+          <div className="p-4 flex-1 overflow-y-auto no-scrollbar">
+            <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Conexão WhatsApp</h2>
             
-            <div className="bg-slate-50/50 p-2.5 rounded-lg border border-slate-200 mb-3 shadow-sm">
+            <div className="bg-slate-50/50 p-3 rounded-xl border border-slate-200 mb-4 shadow-sm">
               <div className="flex items-center gap-2 mb-2">
                 <Smartphone size={16} className={waStatus === 'connected' ? 'text-emerald-500' : waStatus === 'error' ? 'text-rose-500' : 'text-slate-400'} />
                 <span className="text-sm font-medium capitalize text-slate-700">{waStatus}</span>
@@ -889,8 +889,8 @@ export default function App() {
               )}
             </div>
 
-            <h2 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2 mt-4">Armazenamento</h2>
-            <div className="bg-slate-50/50 p-2.5 rounded-lg border border-slate-200 mb-3 shadow-sm">
+            <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 mt-6">Armazenamento</h2>
+            <div className="bg-slate-50/50 p-3 rounded-xl border border-slate-200 mb-4 shadow-sm">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <HardDrive size={16} className="text-blue-500" />
@@ -905,30 +905,30 @@ export default function App() {
                   fetchMedia();
                   setIsMediaGalleryOpen(true);
                 }}
-                className="w-full mt-2 flex items-center justify-center gap-2 text-sm text-blue-600 bg-blue-50 py-2 rounded-lg hover:bg-blue-100 transition-colors font-medium border border-blue-200 shadow-sm"
-            >
-                <ImageIcon size={14} /> Galeria de Arquivos
+                className="w-full mt-3 flex items-center justify-center gap-2 text-sm text-blue-600 bg-blue-50 py-2.5 rounded-lg hover:bg-blue-100 transition-colors font-medium border border-blue-200 shadow-sm"
+              >
+                <ImageIcon size={16} /> Galeria de Arquivos
               </button>
               <button 
                 onClick={() => {
                   fetchAiMemories();
                   setIsAiMemoryOpen(true);
                 }}
-                className="w-full mt-1.5 flex items-center justify-center gap-2 text-sm text-purple-600 bg-purple-50 py-2 rounded-lg hover:bg-purple-100 transition-colors font-medium border border-purple-200 shadow-sm"
+                className="w-full mt-2 flex items-center justify-center gap-2 text-sm text-purple-600 bg-purple-50 py-2.5 rounded-lg hover:bg-purple-100 transition-colors font-medium border border-purple-200 shadow-sm"
               >
-                <Bot size={14} /> Base de Conhecimento IA
+                <Bot size={16} /> Base de Conhecimento IA
               </button>
               
               <button 
                 onClick={handleExport}
-                className="w-full mt-1.5 flex items-center justify-center gap-2 text-sm text-emerald-600 bg-emerald-50 py-2 rounded-lg hover:bg-emerald-100 transition-colors font-medium border border-emerald-200 shadow-sm"
+                className="w-full mt-2 flex items-center justify-center gap-2 text-sm text-emerald-600 bg-emerald-50 py-2.5 rounded-lg hover:bg-emerald-100 transition-colors font-medium border border-emerald-200 shadow-sm"
               >
-                <Download size={14} /> Exportar Sistema (.zip)
+                <Download size={16} /> Exportar Sistema (.zip)
               </button>
             </div>
 
-            <h2 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2 mt-4">Filtro de Tags</h2>
-            <div className="flex flex-wrap gap-1 mb-4">
+            <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 mt-6">Filtro de Tags</h2>
+            <div className="flex flex-wrap gap-1 mb-6">
               {tags.map(tag => {
                 const isSelected = selectedTagFilters.includes(tag.id);
                 return (
@@ -951,7 +951,7 @@ export default function App() {
               {tags.length === 0 && <p className="text-xs text-gray-400 italic">Nenhuma tag criada</p>}
             </div>
 
-            <h2 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Gerenciar Tags</h2>
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Gerenciar Tags</h2>
             <div className="space-y-2">
               {tags.map(tag => (
                 <div key={tag.id} className="flex items-center justify-between text-sm group">
@@ -1048,7 +1048,7 @@ export default function App() {
 
       {/* Kanban Board */}
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="px-3 py-1.5 border-b border-gray-200 bg-white flex items-center justify-between">
+        <div className="p-2 border-b border-gray-200 bg-white flex items-center justify-between">
           <div className="flex items-center">
             {!isSidebarOpen && (
               <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-gray-500 hover:bg-gray-100 rounded-md">
@@ -1071,17 +1071,17 @@ export default function App() {
             </button>
           )}
         </div>
-        <div className="flex-1 overflow-x-auto overflow-y-hidden px-4 pt-4 pb-2 mb-2 flex gap-3 items-start">
+        <div className="flex-1 overflow-x-auto overflow-y-hidden px-6 pt-6 pb-2 mb-4 flex gap-6 items-start">
         {columns.map(column => (
           <div 
             key={column.id} 
-            className="flex-shrink-0 w-60 bg-slate-100/60 rounded-xl border border-slate-200/70 flex flex-col max-h-full overflow-hidden shadow-sm"
+            className="flex-shrink-0 w-80 bg-slate-100/50 rounded-2xl border border-slate-200/60 flex flex-col max-h-full overflow-hidden shadow-sm"
             onDrop={(e) => handleColumnDrop(e, column.id)}
             onDragOver={handleColumnDragOver}
           >
             <div 
-              className="px-3 py-2.5 border-b border-slate-200 flex justify-between items-center bg-slate-100/80 group"
-              style={{ borderTop: `3px solid ${column.color || '#cbd5e1'}` }}
+              className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-100/80 group"
+              style={{ borderTop: `4px solid ${column.color || '#cbd5e1'}` }}
             >
               {editingColumnId === column.id ? (
                 <div className="flex-1 flex flex-col gap-2">
@@ -1109,7 +1109,7 @@ export default function App() {
                 </div>
               ) : (
                 <h3 
-                  className="font-semibold text-slate-700 text-sm flex-1 cursor-pointer hover:text-emerald-600 flex items-center gap-1.5"
+                  className="font-semibold text-slate-700 flex-1 cursor-pointer hover:text-emerald-600 flex items-center gap-2"
                   onClick={() => {
                     setEditingColumnId(column.id);
                     setEditColumnName(column.name);
@@ -1117,32 +1117,32 @@ export default function App() {
                   }}
                   title="Clique para editar"
                 >
-                  <span className="w-2.5 h-2.5 rounded-full shadow-sm border border-slate-200" style={{ backgroundColor: column.color || '#e2e8f0' }}></span>
+                  <span className="w-3 h-3 rounded-full shadow-sm border border-slate-200" style={{ backgroundColor: column.color || '#e2e8f0' }}></span>
                   <span className="tracking-tight">{column.name}</span>
                 </h3>
               )}
-              <span className="bg-white text-slate-500 shadow-sm border border-slate-200 text-[10px] px-2 py-0.5 rounded-full font-bold ml-2">
+              <span className="bg-white text-slate-500 shadow-sm border border-slate-200 text-xs px-2.5 py-0.5 rounded-full font-bold ml-2">
                 {filteredChats.filter(c => c.column_id === column.id).length}
               </span>
             </div>
             
-            <div className="p-2 flex-1 overflow-y-auto space-y-2 no-scrollbar custom-column-scroll">
+            <div className="p-3 flex-1 overflow-y-auto space-y-3 no-scrollbar custom-column-scroll">
               {filteredChats.filter(c => c.column_id === column.id).map(chat => (
                 <div 
                   key={chat.id} 
                   onClick={() => handleChatSelect(chat)}
                   draggable
                   onDragStart={(e) => handleDragStart(e, chat.id)}
-                  className={`group bg-white p-3 rounded-lg shadow-sm border cursor-pointer hover:shadow-md hover:border-slate-300 transition-all ${selectedChat?.id === chat.id ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-slate-200'} flex flex-col relative`}
+                  className={`group bg-white p-4 rounded-xl shadow-sm border cursor-pointer hover:shadow-md hover:border-slate-300 transition-all ${selectedChat?.id === chat.id ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-slate-200'} flex flex-col relative`}
                 >
-                  <div className="flex justify-between items-start mb-1.5">
-                    <div className="flex items-center gap-1.5 overflow-hidden">
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex items-center gap-2 overflow-hidden">
                       {chat.profile_pic ? (
                         <img 
                           key={chat.profile_pic}
                           src={chat.profile_pic} 
                           alt="" 
-                          className="w-7 h-7 rounded-full object-cover flex-shrink-0" 
+                          className="w-8 h-8 rounded-full object-cover flex-shrink-0" 
                           referrerPolicy="no-referrer"
                           onLoad={(e) => {
                             e.currentTarget.style.display = 'block';
@@ -1158,7 +1158,7 @@ export default function App() {
                           }}
                         />
                       ) : null}
-                      <div className={`w-7 h-7 rounded-full border border-slate-100 bg-slate-100 flex items-center justify-center text-slate-500 font-semibold text-xs flex-shrink-0 ${chat.profile_pic ? 'hidden' : ''}`}>
+                      <div className={`w-8 h-8 rounded-full border border-slate-100 bg-slate-100 flex items-center justify-center text-slate-500 font-semibold flex-shrink-0 ${chat.profile_pic ? 'hidden' : ''}`}>
                         {chat.name ? chat.name.charAt(0).toUpperCase() : '?'}
                       </div>
                       {editingChatNameId === chat.id ? (
@@ -1190,7 +1190,7 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                  <p className="text-[11px] text-slate-500 truncate mb-2 flex items-center gap-1 opacity-90 leading-relaxed">
+                  <p className="text-[11px] text-slate-500 truncate mb-3 flex items-center gap-1.5 opacity-90 leading-relaxed">
                     {chat.last_message_from_me === 1 && (
                       <CheckCheck size={14} className="text-sky-500 flex-shrink-0" />
                     )}
@@ -1245,9 +1245,9 @@ export default function App() {
         ))}
 
         {/* Add Column Button */}
-        <div className="flex-shrink-0 w-60">
+        <div className="flex-shrink-0 w-80">
           {isAddingColumn ? (
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm focus-within:border-emerald-300 focus-within:ring-1 focus-within:ring-emerald-300 transition-all">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm focus-within:border-emerald-300 focus-within:ring-1 focus-within:ring-emerald-300 transition-all">
               <input
                 type="text"
                 value={newColumnName}
@@ -1274,7 +1274,7 @@ export default function App() {
           ) : (
             <button 
               onClick={() => setIsAddingColumn(true)}
-              className="w-full flex items-center justify-center gap-2 bg-slate-100/50 border-2 border-dashed border-slate-300 text-slate-500 rounded-xl py-4 font-medium hover:bg-slate-100 hover:text-emerald-600 hover:border-emerald-300 transition-colors text-sm"
+              className="w-full flex items-center justify-center gap-2 bg-slate-100/50 border-2 border-dashed border-slate-300 text-slate-500 rounded-2xl py-5 font-medium hover:bg-slate-100 hover:text-emerald-600 hover:border-emerald-300 transition-colors"
             >
               <Plus size={20} /> Nova Coluna
             </button>
@@ -1298,15 +1298,15 @@ export default function App() {
               document.body.style.cursor = 'col-resize';
             }}
           />
-          <div className="px-3 py-2.5 border-b border-slate-100 flex flex-col bg-white">
-            <div className="flex justify-between items-start mb-2">
-              <div className="flex items-center gap-2">
+          <div className="p-4 border-b border-slate-100 flex flex-col bg-white">
+            <div className="flex justify-between items-start mb-3">
+              <div className="flex items-center gap-3">
                 {selectedChat.profile_pic ? (
                   <img 
                     key={selectedChat.profile_pic}
                     src={selectedChat.profile_pic} 
                     alt="" 
-                    className="w-9 h-9 rounded-full object-cover flex-shrink-0 shadow-sm border border-slate-100" 
+                    className="w-11 h-11 rounded-full object-cover flex-shrink-0 shadow-sm border border-slate-100" 
                     onLoad={(e) => {
                       e.currentTarget.style.display = 'block';
                       e.currentTarget.nextElementSibling?.classList.add('hidden');
@@ -1321,14 +1321,14 @@ export default function App() {
                     }}
                   />
                 ) : null}
-                <div className={`w-9 h-9 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-500 font-bold text-base flex-shrink-0 ${selectedChat.profile_pic ? 'hidden' : ''}`}>
+                <div className={`w-11 h-11 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-500 font-bold text-lg flex-shrink-0 ${selectedChat.profile_pic ? 'hidden' : ''}`}>
                   {selectedChat.name ? selectedChat.name.charAt(0).toUpperCase() : '?'}
                 </div>
                 <div>
-                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                  <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
                     {selectedChat.name || selectedChat.phone}
                   </h3>
-                  <p className="text-xs text-slate-500">{selectedChat.phone}</p>
+                  <p className="text-sm text-slate-500">{selectedChat.phone}</p>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -1391,7 +1391,7 @@ export default function App() {
             </div>
           </div>
           
-          <div ref={chatScrollContainerRef} className="flex-1 overflow-y-auto p-3 space-y-2 bg-[#e5ddd5]" onDrop={handleDrop} onDragOver={handleDragOver} style={{ backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')", backgroundRepeat: 'repeat', backgroundSize: '400px' }}>
+          <div ref={chatScrollContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#e5ddd5]" onDrop={handleDrop} onDragOver={handleDragOver} style={{ backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')", backgroundRepeat: 'repeat', backgroundSize: '400px' }}>
             {messages.map((msg, index) => {
               const currentMsgDate = new Date(msg.timestamp);
               const prevMsgDate = index > 0 ? new Date(messages[index - 1].timestamp) : null;
@@ -1418,7 +1418,7 @@ export default function App() {
                     </div>
                   )}
                   <div className={`flex ${msg.from_me ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[85%] rounded-lg px-3 py-1.5 text-[13px] leading-relaxed shadow-sm flex flex-col relative group/msg ${msg.from_me ? 'bg-[#dcf8c6] text-gray-800' : 'bg-white text-gray-800'}`}>
+                    <div className={`max-w-[85%] rounded-lg px-3 py-2 text-[14px] leading-relaxed shadow-sm flex flex-col relative group/msg ${msg.from_me ? 'bg-[#dcf8c6] text-gray-800' : 'bg-white text-gray-800'}`}>
                       {msg.media_url && (
                         <div className="mb-2">
                           {msg.media_type?.startsWith('image/') ? (
@@ -1468,7 +1468,7 @@ export default function App() {
             <div ref={messagesEndRef} />
           </div>
           
-          <div className="p-2.5 border-t border-slate-200 bg-white relative">
+          <div className="p-3 border-t border-slate-200 bg-white relative">
             {uploadingMedia && (
               <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10 backdrop-blur-[1px]">
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-emerald-500"></div>
@@ -1489,13 +1489,13 @@ export default function App() {
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 placeholder="Digite uma mensagem ou arraste um arquivo..."
-                className="flex-1 border border-slate-200 bg-slate-50 rounded-full px-4 py-2 text-[13px] focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-shadow"
+                className="flex-1 border border-slate-200 bg-slate-50 rounded-full px-5 py-2.5 text-[13px] focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-shadow"
                 disabled={uploadingMedia || waStatus !== 'connected'}
               />
               <button 
                 type="submit"
                 disabled={(!newMessage.trim() && !uploadingMedia) || waStatus !== 'connected'}
-                className="bg-emerald-600 text-white rounded-full w-9 h-9 flex items-center justify-center hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm ml-1"
+                className="bg-emerald-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm ml-1"
               >
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" className="ml-1"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"></path></svg>
               </button>
